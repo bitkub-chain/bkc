@@ -62,6 +62,11 @@ func (api *PublicEthereumAPI) Coinbase() (common.Address, error) {
 	return api.Etherbase()
 }
 
+// SealerAddress is the address that is used for sealing blocks
+func (api *PublicEthereumAPI) SealerAddress() (common.Address, error) {
+	return api.e.SealerAddress()
+}
+
 // Hashrate returns the POW hashrate
 func (api *PublicEthereumAPI) Hashrate() hexutil.Uint64 {
 	return hexutil.Uint64(api.e.Miner().Hashrate())

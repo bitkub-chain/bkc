@@ -465,6 +465,11 @@ var (
 		Usage: "Public address for block mining rewards (default = first account)",
 		Value: "0",
 	}
+	MinerSealerAddressFlag = cli.StringFlag{
+		Name:  "miner.sealerAddress",
+		Usage: "Address for sealing blocks (default = first account)",
+		Value: "0",
+	}
 	MinerExtraDataFlag = cli.StringFlag{
 		Name:  "miner.extradata",
 		Usage: "Block extra data set by the miner (default = client version)",
@@ -1120,6 +1125,28 @@ func setEtherbase(ctx *cli.Context, ks *keystore.KeyStore, cfg *ethconfig.Config
 	}
 }
 
+// setSealerAddress retrieves the sealer address either from the directly specified
+// command line flags or from the keystore if CLI indexed.
+func setSealerAddress(ctx *cli.Context, ks *keystore.KeyStore, cfg *ethconfig.Config) {
+	// Extract the current sealer address
+	var sealerAddress string
+	if ctx.GlobalIsSet(MinerSealerAddressFlag.Name) {
+		sealerAddress = ctx.GlobalString(MinerSealerAddressFlag.Name)
+	}
+	// Convert the sealer address into an address and configure it
+	if sealerAddress != "" {
+		if ks != nil {
+			account, err := MakeAddress(ks, sealerAddress)
+			if err != nil {
+				Fatalf("Invalid miner sealer address: %v", err)
+			}
+			cfg.Miner.SealerAddress = account.Address
+		} else {
+			Fatalf("No sealer address configured")
+		}
+	}
+}
+
 // MakePasswordList reads password lines from the file specified by the global --password flag.
 func MakePasswordList(ctx *cli.Context) []string {
 	path := ctx.GlobalString(PasswordFileFlag.Name)
@@ -1490,6 +1517,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		ks = keystores[0].(*keystore.KeyStore)
 	}
 	setEtherbase(ctx, ks, cfg)
+	setSealerAddress(ctx, ks, cfg)
 	setGPO(ctx, &cfg.GPO, ctx.GlobalString(SyncModeFlag.Name) == "light")
 	setTxPool(ctx, &cfg.TxPool)
 	setEthash(ctx, cfg)
@@ -1654,9 +1682,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			// when we're definitely concerned with only one account.
 			passphrase = list[0]
 		}
-		// setEtherbase has been called above, configuring the miner address from command line flags.
-		if cfg.Miner.Etherbase != (common.Address{}) {
-			developer = accounts.Account{Address: cfg.Miner.Etherbase}
+		// setSealerAddress has been called above, configuring the miner address from command line flags.
+		if cfg.Miner.SealerAddress != (common.Address{}) {
+			developer = accounts.Account{Address: cfg.Miner.SealerAddress}
 		} else if accs := ks.Accounts(); len(accs) > 0 {
 			developer = ks.Accounts()[0]
 		} else {
