@@ -230,8 +230,8 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		snap.Recents[number] = signer
 
 		// Header authorized, discard any previous votes from the signer
+		voteAddr := common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
 		for i, vote := range snap.Votes {
-			voteAddr := common.BytesToAddress(header.MixDigest[12:])
 			if vote.Signer == signer && vote.Address == voteAddr {
 				// Uncast the vote from the cached tally
 				snap.uncast(vote.Address, vote.Authorize)
@@ -251,7 +251,6 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		default:
 			return nil, errInvalidVote
 		}
-		voteAddr := common.BytesToAddress(header.MixDigest[12:])
 		if snap.cast(voteAddr, authorize) {
 			snap.Votes = append(snap.Votes, &Vote{
 				Signer:    signer,
