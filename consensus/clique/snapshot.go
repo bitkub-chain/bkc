@@ -97,7 +97,6 @@ func loadSnapshot(config *params.CliqueConfig, sigcache *lru.ARCCache, db ethdb.
 	}
 	snap.config = config
 	snap.sigcache = sigcache
-
 	return snap, nil
 }
 
@@ -182,7 +181,7 @@ func (s *Snapshot) uncast(address common.Address, authorize bool) bool {
 
 // apply creates a new authorization snapshot by applying the given headers to
 // the original one.
-func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
+func (s *Snapshot) apply(headers []*types.Header, isBangkok bool) (*Snapshot, error) {
 	// Allow passing in no headers for cleaner code
 	if len(headers) == 0 {
 		return s, nil
@@ -230,7 +229,11 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		snap.Recents[number] = signer
 
 		// Header authorized, discard any previous votes from the signer
-		voteAddr := common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
+		voteAddr := header.Coinbase
+		if isBangkok {
+			voteAddr = common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
+		}
+
 		for i, vote := range snap.Votes {
 			if vote.Signer == signer && vote.Address == voteAddr {
 				// Uncast the vote from the cached tally

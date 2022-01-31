@@ -255,9 +255,15 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	}
 	// Checkpoint blocks need to enforce zero beneficiary
 	checkpoint := (number % c.config.Epoch) == 0
-	voteAddr := common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
-	if checkpoint && voteAddr != (common.Address{}) {
-		return errInvalidCheckpointBeneficiary
+	if chain.Config().IsBangkok(header.Number) {
+		voteAddr := common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
+		if checkpoint && voteAddr != (common.Address{}) {
+			return errInvalidCheckpointBeneficiary
+		}
+	} else {
+		if checkpoint && header.Coinbase != (common.Address{}) {
+			return errInvalidCheckpointBeneficiary
+		}
 	}
 	// Nonces must be 0x00..0 or 0xff..f, zeroes enforced on checkpoints
 	if !bytes.Equal(header.Nonce[:], nonceAuthVote) && !bytes.Equal(header.Nonce[:], nonceDropVote) {
@@ -281,6 +287,12 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	if checkpoint && signersBytes%common.AddressLength != 0 {
 		return errInvalidCheckpointSigners
 	}
+	if !chain.Config().IsBangkok(header.Number) {
+		if header.MixDigest != (common.Hash{}) {
+			return errInvalidMixDigest
+		}
+	}
+
 	// Ensure that the block doesn't contain any uncles which are meaningless in PoA
 	if header.UncleHash != uncleHash {
 		return errInvalidUncleHash
@@ -375,6 +387,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			snap = s.(*Snapshot)
 			break
 		}
+		var header *types.Header
 		// If an on-disk checkpoint snapshot can be found, use that
 		if number%checkpointInterval == 0 {
 			if s, err := loadSnapshot(c.config, c.signatures, c.db, hash); err == nil {
@@ -397,6 +410,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 					copy(signers[i][:], checkpoint.Extra[extraVanity+i*common.AddressLength:])
 				}
 				snap = newSnapshot(c.config, c.signatures, number, hash, signers)
+
 				if err := snap.store(c.db); err != nil {
 					return nil, err
 				}
@@ -405,7 +419,6 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			}
 		}
 		// No snapshot for this header, gather the header and move backward
-		var header *types.Header
 		if len(parents) > 0 {
 			// If we have explicit parents, pick from there (enforced)
 			header = parents[len(parents)-1]
@@ -423,11 +436,12 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		headers = append(headers, header)
 		number, hash = number-1, header.ParentHash
 	}
+
 	// Previous snapshot found, apply any pending headers on top of it
 	for i := 0; i < len(headers)/2; i++ {
 		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
 	}
-	snap, err := snap.apply(headers)
+	snap, err := snap.apply(headers, chain.Config().IsBangkok(new(big.Int).SetUint64(number)))
 	if err != nil {
 		return nil, err
 	}
@@ -464,6 +478,7 @@ func (c *Clique) verifySeal(snap *Snapshot, header *types.Header, parents []*typ
 	}
 	// Resolve the authorization key and check against signers
 	signer, err := ecrecover(header, c.signatures)
+
 	if err != nil {
 		return err
 	}
@@ -496,6 +511,10 @@ func (c *Clique) verifySeal(snap *Snapshot, header *types.Header, parents []*typ
 func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
 	// If the block isn't a checkpoint, cast a random vote (good enough for now)
 	number := header.Number.Uint64()
+	if !chain.Config().IsBangkok(header.Number) {
+		header.Coinbase = common.Address{}
+		header.Nonce = types.BlockNonce{}
+	}
 	// Assemble the voting snapshot to check which votes make sense
 	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil)
 	if err != nil {
@@ -513,12 +532,22 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		}
 		// If there's pending proposals, cast a vote on them
 		if len(addresses) > 0 {
-			addr := addresses[rand.Intn(len(addresses))]
-			header.MixDigest = addr.Hash()
-			if c.proposals[addr] {
-				copy(header.Nonce[:], nonceAuthVote)
+			if chain.Config().IsBangkok(header.Number) {
+				addr := addresses[rand.Intn(len(addresses))]
+				header.MixDigest = addr.Hash()
+				if c.proposals[addr] {
+					copy(header.Nonce[:], nonceAuthVote)
+				} else {
+					copy(header.Nonce[:], nonceDropVote)
+				}
 			} else {
-				copy(header.Nonce[:], nonceDropVote)
+				header.Coinbase = addresses[rand.Intn(len(addresses))]
+				header.MixDigest = common.Hash{}
+				if c.proposals[header.Coinbase] {
+					copy(header.Nonce[:], nonceAuthVote)
+				} else {
+					copy(header.Nonce[:], nonceDropVote)
+				}
 			}
 		}
 		c.lock.RUnlock()

@@ -499,22 +499,21 @@ func (s *Ethereum) StartMining(threads int) error {
 			}
 		}
 		if cli != nil {
-			sa, err := s.SealerAddress()
+			eb, err := s.SealerAddress()
 			if err != nil {
 				log.Error("Cannot start mining without sealer address", "err", err)
 				return fmt.Errorf("sealer address missing: %v", err)
 			}
-			wallet, err := s.accountManager.Find(accounts.Account{Address: sa})
+			wallet, err := s.accountManager.Find(accounts.Account{Address: eb})
 			if wallet == nil || err != nil {
 				log.Error("Sealer account unavailable locally", "err", err)
 				return fmt.Errorf("signer missing: %v", err)
 			}
-			cli.Authorize(sa, wallet.SignData)
+			cli.Authorize(eb, wallet.SignData)
 		}
 		// If mining is started, we can disable the transaction rejection mechanism
 		// introduced to speed sync times.
 		atomic.StoreUint32(&s.handler.acceptTxs, 1)
-
 		go s.miner.Start(eb)
 	}
 	return nil
