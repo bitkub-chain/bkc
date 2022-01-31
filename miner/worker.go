@@ -250,6 +250,13 @@ func (w *worker) setEtherbase(addr common.Address) {
 	w.coinbase = addr
 }
 
+// setSealer sets the etherbase used to initialize the block sealer field.
+func (w *worker) setSealer(addr common.Address) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.sealer = addr
+}
+
 func (w *worker) setGasCeil(ceil uint64) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -517,7 +524,10 @@ func (w *worker) mainLoop() {
 					continue
 				}
 				w.mu.RLock()
-				coinbase := w.coinbase
+				beneficiary := w.sealer
+				if w.chainConfig.IsBangkok(w.current.header.Number) {
+					beneficiary = w.coinbase
+				}
 				w.mu.RUnlock()
 
 				txs := make(map[common.Address]types.Transactions)
@@ -527,7 +537,7 @@ func (w *worker) mainLoop() {
 				}
 				txset := types.NewTransactionsByPriceAndNonce(w.current.signer, txs, w.current.header.BaseFee)
 				tcount := w.current.tcount
-				w.commitTransactions(txset, coinbase, nil)
+				w.commitTransactions(txset, beneficiary, nil)
 				// Only update the snapshot if any new transactons were added
 				// to the pending block
 				if tcount != w.current.tcount {
@@ -771,13 +781,9 @@ func (w *worker) updateSnapshot() {
 	w.snapshotState = w.current.state.Copy()
 }
 
-func (w *worker) commitTransaction(tx *types.Transaction, coinbase common.Address) ([]*types.Log, error) {
+func (w *worker) commitTransaction(tx *types.Transaction, beneficiary common.Address) ([]*types.Log, error) {
 	snap := w.current.state.Snapshot()
-	sealerAddress := w.config.SealerAddress
-	if w.chainConfig.IsBangkok(w.current.header.Number) {
-		sealerAddress = w.coinbase
-	}
-	receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &sealerAddress, w.current.gasPool, w.current.state, w.current.header, tx, &w.current.header.GasUsed, *w.chain.GetVMConfig())
+	receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &beneficiary, w.current.gasPool, w.current.state, w.current.header, tx, &w.current.header.GasUsed, *w.chain.GetVMConfig())
 	if err != nil {
 		w.current.state.RevertToSnapshot(snap)
 		return nil, err
@@ -788,7 +794,7 @@ func (w *worker) commitTransaction(tx *types.Transaction, coinbase common.Addres
 	return receipt.Logs, nil
 }
 
-func (w *worker) commitTransactions(txs *types.TransactionsByPriceAndNonce, coinbase common.Address, interrupt *int32) bool {
+func (w *worker) commitTransactions(txs *types.TransactionsByPriceAndNonce, beneficiary common.Address, interrupt *int32) bool {
 	// Short circuit if current is nil
 	if w.current == nil {
 		return true
@@ -848,7 +854,7 @@ func (w *worker) commitTransactions(txs *types.TransactionsByPriceAndNonce, coin
 		// Start executing the transaction
 		w.current.state.Prepare(tx.Hash(), w.current.tcount)
 
-		logs, err := w.commitTransaction(tx, coinbase)
+		logs, err := w.commitTransaction(tx, beneficiary)
 		switch {
 		case errors.Is(err, core.ErrGasLimitReached):
 			// Pop the current out-of-gas transaction without shifting in the next from the account
@@ -1018,15 +1024,19 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 			localTxs[account] = txs
 		}
 	}
+	beneficiary := w.sealer
+	if w.chainConfig.IsBangkok(header.Number) {
+		beneficiary = w.coinbase
+	}
 	if len(localTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(w.current.signer, localTxs, header.BaseFee)
-		if w.commitTransactions(txs, w.coinbase, interrupt) {
+		if w.commitTransactions(txs, beneficiary, interrupt) {
 			return
 		}
 	}
 	if len(remoteTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(w.current.signer, remoteTxs, header.BaseFee)
-		if w.commitTransactions(txs, w.coinbase, interrupt) {
+		if w.commitTransactions(txs, beneficiary, interrupt) {
 			return
 		}
 	}

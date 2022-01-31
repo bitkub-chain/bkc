@@ -264,6 +264,9 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 		if checkpoint && header.Coinbase != (common.Address{}) {
 			return errInvalidCheckpointBeneficiary
 		}
+		if header.MixDigest != (common.Hash{}) {
+			return errInvalidMixDigest
+		}
 	}
 	// Nonces must be 0x00..0 or 0xff..f, zeroes enforced on checkpoints
 	if !bytes.Equal(header.Nonce[:], nonceAuthVote) && !bytes.Equal(header.Nonce[:], nonceDropVote) {
@@ -286,11 +289,6 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	}
 	if checkpoint && signersBytes%common.AddressLength != 0 {
 		return errInvalidCheckpointSigners
-	}
-	if !chain.Config().IsBangkok(header.Number) {
-		if header.MixDigest != (common.Hash{}) {
-			return errInvalidMixDigest
-		}
 	}
 
 	// Ensure that the block doesn't contain any uncles which are meaningless in PoA
@@ -532,22 +530,17 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		}
 		// If there's pending proposals, cast a vote on them
 		if len(addresses) > 0 {
+			addr := addresses[rand.Intn(len(addresses))]
 			if chain.Config().IsBangkok(header.Number) {
-				addr := addresses[rand.Intn(len(addresses))]
+				// addr := addresses[rand.Intn(len(addresses))]
 				header.MixDigest = addr.Hash()
-				if c.proposals[addr] {
-					copy(header.Nonce[:], nonceAuthVote)
-				} else {
-					copy(header.Nonce[:], nonceDropVote)
-				}
 			} else {
-				header.Coinbase = addresses[rand.Intn(len(addresses))]
-				header.MixDigest = common.Hash{}
-				if c.proposals[header.Coinbase] {
-					copy(header.Nonce[:], nonceAuthVote)
-				} else {
-					copy(header.Nonce[:], nonceDropVote)
-				}
+				header.Coinbase = addr
+			}
+			if c.proposals[addr] {
+				copy(header.Nonce[:], nonceAuthVote)
+			} else {
+				copy(header.Nonce[:], nonceDropVote)
 			}
 		}
 		c.lock.RUnlock()

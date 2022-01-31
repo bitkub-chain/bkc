@@ -48,9 +48,10 @@ func NewEVMBlockContext(header *types.Header, chain ChainContext, author *common
 
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	if author == nil {
-		beneficiary, _ = chain.Engine().Author(header)
 		if chain.Config().IsBangkok(header.Number) {
 			beneficiary = header.Coinbase
+		} else {
+			beneficiary, _ = chain.Engine().Author(header)
 		}
 	} else {
 		beneficiary = *author
