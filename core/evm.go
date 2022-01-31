@@ -23,6 +23,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 // ChainContext supports retrieving headers and consensus parameters from the
@@ -33,6 +34,8 @@ type ChainContext interface {
 
 	// GetHeader returns the hash corresponding to their hash.
 	GetHeader(common.Hash, uint64) *types.Header
+
+	Config() *params.ChainConfig
 }
 
 // NewEVMBlockContext creates a new context for use in the EVM.
@@ -46,7 +49,7 @@ func NewEVMBlockContext(header *types.Header, chain ChainContext, author *common
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	if author == nil {
 		beneficiary, _ = chain.Engine().Author(header)
-		if header.Number.Cmp(big.NewInt(10)) > 0 {
+		if chain.Config().IsBangkok(header.Number) {
 			beneficiary = header.Coinbase
 		}
 	} else {
