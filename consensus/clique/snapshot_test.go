@@ -512,7 +512,6 @@ func TestCliqueBangkokTransition(t *testing.T) {
 		signers      []string
 		votes        []testerVote
 		results      []string
-		failure      error
 		bangkokBlock *big.Int
 	}{
 		{
@@ -658,11 +657,9 @@ func TestCliqueBangkokTransition(t *testing.T) {
 		if failed {
 			continue
 		}
-		if _, err = chain.InsertChain(batches[len(batches)-1]); err != tt.failure {
-			t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
-		}
-		if tt.failure != nil {
-			continue
+		_, err = chain.InsertChain(batches[len(batches)-1])
+		if err != nil {
+			t.Errorf("test %d failed: %v", i, err)
 		}
 		// No failure was produced or requested, generate the final voting snapshot
 		head := blocks[len(blocks)-1]
