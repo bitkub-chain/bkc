@@ -250,7 +250,7 @@ func (w *worker) setEtherbase(addr common.Address) {
 	w.coinbase = addr
 }
 
-// setSealer sets the etherbase used to initialize the block sealer field.
+// setSealer sets the address to initialize the block sealer field.
 func (w *worker) setSealer(addr common.Address) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -524,9 +524,9 @@ func (w *worker) mainLoop() {
 					continue
 				}
 				w.mu.RLock()
-				beneficiary := w.sealer
-				if w.chainConfig.IsBangkok(w.current.header.Number) {
-					beneficiary = w.coinbase
+				beneficiary := w.coinbase
+				if !w.chainConfig.IsBangkok(w.current.header.Number) {
+					beneficiary = w.sealer
 				}
 				w.mu.RUnlock()
 
@@ -1024,10 +1024,11 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 			localTxs[account] = txs
 		}
 	}
-	beneficiary := w.sealer
-	if w.chainConfig.IsBangkok(header.Number) {
-		beneficiary = w.coinbase
+	beneficiary := w.coinbase
+	if !w.chainConfig.IsBangkok(w.current.header.Number) {
+		beneficiary = w.sealer
 	}
+
 	if len(localTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(w.current.signer, localTxs, header.BaseFee)
 		if w.commitTransactions(txs, beneficiary, interrupt) {

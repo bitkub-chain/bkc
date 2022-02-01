@@ -215,7 +215,7 @@ func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, co
 	// If proof-of-authority is requested, set it up
 	var engine consensus.Engine
 	if chainConfig.Clique != nil {
-		engine = clique.New(chainConfig.Clique, db)
+		engine = clique.New(chainConfig, db)
 	} else {
 		switch config.PowMode {
 		case ethash.ModeFake:

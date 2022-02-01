@@ -511,8 +511,6 @@ func (s *Ethereum) StartMining(threads int) error {
 			}
 			cli.Authorize(sa, wallet.SignData)
 			s.miner.SetSealer(sa)
-		} else {
-			s.miner.SetSealer(eb)
 		}
 		// If mining is started, we can disable the transaction rejection mechanism
 		// introduced to speed sync times.
