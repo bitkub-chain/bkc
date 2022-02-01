@@ -504,3 +504,195 @@ func TestClique(t *testing.T) {
 		}
 	}
 }
+
+func TestCliqueBangkokTransition(t *testing.T) {
+	// Define the various voting scenarios to test
+	tests := []struct {
+		epoch        uint64
+		signers      []string
+		votes        []testerVote
+		results      []string
+		failure      error
+		bangkokBlock *big.Int
+	}{
+		{
+			// Single signer, voting to add two others (only accept first, second needs 2 votes)
+			signers: []string{"A"},
+			votes: []testerVote{
+				{signer: "A", voted: "B", auth: true},
+				{signer: "B"},
+				{signer: "A", voted: "C", auth: true},
+			},
+			results:      []string{"A", "B"},
+			bangkokBlock: big.NewInt(2),
+		}, {
+			// Two signers, voting to add three others (only accept first two, third needs 3 votes already)
+			signers: []string{"A", "B"},
+			votes: []testerVote{
+				{signer: "A", voted: "C", auth: true},
+				{signer: "B", voted: "C", auth: true},
+				{signer: "A", voted: "D", auth: true},
+				{signer: "B", voted: "D", auth: true},
+				{signer: "C"},
+				{signer: "A", voted: "E", auth: true},
+				{signer: "B", voted: "E", auth: true},
+			},
+			results:      []string{"A", "B", "C", "D"},
+			bangkokBlock: big.NewInt(4),
+		}, {
+			// Two signers, actually needing mutual consent to drop either of them (fulfilled)
+			signers: []string{"A", "B"},
+			votes: []testerVote{
+				{signer: "A", voted: "B", auth: false},
+				{signer: "B", voted: "B", auth: false},
+			},
+			results:      []string{"A"},
+			bangkokBlock: big.NewInt(2),
+		}, {
+			// Three signers, two of them deciding to drop the third
+			signers: []string{"A", "B", "C"},
+			votes: []testerVote{
+				{signer: "A", voted: "C", auth: false},
+				{signer: "B", voted: "C", auth: false},
+			},
+			results:      []string{"A", "B"},
+			bangkokBlock: big.NewInt(2),
+		},
+	}
+	// Run through the scenarios and test them
+	for i, tt := range tests {
+		// Create the account pool and generate the initial set of signers
+		accounts := newTesterAccountPool()
+
+		signers := make([]common.Address, len(tt.signers))
+		for j, signer := range tt.signers {
+			signers[j] = accounts.address(signer)
+		}
+		for j := 0; j < len(signers); j++ {
+			for k := j + 1; k < len(signers); k++ {
+				if bytes.Compare(signers[j][:], signers[k][:]) > 0 {
+					signers[j], signers[k] = signers[k], signers[j]
+				}
+			}
+		}
+		// Create the genesis block with the initial set of signers
+		genesis := &core.Genesis{
+			ExtraData: make([]byte, extraVanity+common.AddressLength*len(signers)+extraSeal),
+			BaseFee:   big.NewInt(params.InitialBaseFee),
+		}
+		for j, signer := range signers {
+			copy(genesis.ExtraData[extraVanity+j*common.AddressLength:], signer[:])
+		}
+		// Create a pristine blockchain with the genesis injected
+		db := rawdb.NewMemoryDatabase()
+		genesis.Commit(db)
+
+		// Assemble a chain of headers from the cast votes
+		config := *params.TestChainConfig
+		config.BangkokBlock = tt.bangkokBlock
+		config.MuirGlacierBlock = nil
+		config.BerlinBlock = nil
+		config.LondonBlock = nil
+		config.ArrowGlacierBlock = nil
+		config.MergeForkBlock = nil
+		config.Clique = &params.CliqueConfig{
+			Period: 1,
+			Epoch:  tt.epoch,
+		}
+		engine := New(&config, db)
+		engine.fakeDiff = true
+
+		blocks, _ := core.GenerateChain(&config, genesis.ToBlock(db), engine, db, len(tt.votes), func(j int, gen *core.BlockGen) {
+			// Cast the vote contained in this block
+			if config.IsBangkok(gen.Number()) {
+				gen.SetMixDigest(accounts.address(tt.votes[j].voted))
+			} else {
+				gen.SetCoinbase(accounts.address(tt.votes[j].voted))
+			}
+			if tt.votes[j].auth {
+				var nonce types.BlockNonce
+				copy(nonce[:], nonceAuthVote)
+				gen.SetNonce(nonce)
+			}
+		})
+		// Iterate through the blocks and seal them individually
+		for j, block := range blocks {
+			// Get the header and prepare it for signing
+			header := block.Header()
+			if j > 0 {
+				header.ParentHash = blocks[j-1].Hash()
+			}
+			header.Extra = make([]byte, extraVanity+extraSeal)
+			if auths := tt.votes[j].checkpoint; auths != nil {
+				header.Extra = make([]byte, extraVanity+len(auths)*common.AddressLength+extraSeal)
+				accounts.checkpoint(header, auths)
+			}
+			header.Difficulty = diffInTurn // Ignored, we just need a valid number
+
+			// Generate the signature, embed it into the header and the block
+			accounts.sign(header, tt.votes[j].signer)
+			blocks[j] = block.WithSeal(header)
+		}
+		// Split the blocks up into individual import batches (cornercase testing)
+		batches := [][]*types.Block{nil}
+		for j, block := range blocks {
+			if tt.votes[j].newbatch {
+				batches = append(batches, nil)
+			}
+			batches[len(batches)-1] = append(batches[len(batches)-1], block)
+		}
+		// Pass all the headers through clique and ensure tallying succeeds
+		chain, err := core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil, nil)
+		if err != nil {
+			t.Errorf("test %d: failed to create test chain: %v", i, err)
+			continue
+		}
+		failed := false
+		for j := 0; j < len(batches)-1; j++ {
+			if k, err := chain.InsertChain(batches[j]); err != nil {
+				t.Errorf("test %d: failed to import batch %d, block %d: %v", i, j, k, err)
+				failed = true
+				break
+			}
+		}
+		if failed {
+			continue
+		}
+		if _, err = chain.InsertChain(batches[len(batches)-1]); err != tt.failure {
+			t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
+		}
+		if tt.failure != nil {
+			continue
+		}
+		// No failure was produced or requested, generate the final voting snapshot
+		head := blocks[len(blocks)-1]
+
+		snap, err := engine.snapshot(chain, head.NumberU64(), head.Hash(), nil)
+		if err != nil {
+			t.Errorf("test %d: failed to retrieve voting snapshot: %v", i, err)
+			continue
+		}
+		// Verify the final list of signers against the expected ones
+		signers = make([]common.Address, len(tt.results))
+		for j, signer := range tt.results {
+			signers[j] = accounts.address(signer)
+		}
+		for j := 0; j < len(signers); j++ {
+			for k := j + 1; k < len(signers); k++ {
+				if bytes.Compare(signers[j][:], signers[k][:]) > 0 {
+					signers[j], signers[k] = signers[k], signers[j]
+				}
+			}
+		}
+		result := snap.signers()
+		if len(result) != len(signers) {
+			t.Errorf("test %d: signers mismatch: have %x, want %x", i, result, signers)
+			continue
+		}
+		for j := 0; j < len(result); j++ {
+			if !bytes.Equal(result[j][:], signers[j][:]) {
+				t.Errorf("test %d, signer %d: signer mismatch: have %x, want %x", i, j, result[j], signers[j])
+			}
+		}
+	}
+}
