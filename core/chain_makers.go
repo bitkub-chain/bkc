@@ -61,6 +61,19 @@ func (b *BlockGen) SetCoinbase(addr common.Address) {
 	b.gasPool = new(GasPool).AddGas(b.header.GasLimit)
 }
 
+// SetCoinbase sets the coinbase of the generated block.
+// It can be called at most once.
+func (b *BlockGen) SetMixDigest(addr common.Address) {
+	if b.gasPool != nil {
+		if len(b.txs) > 0 {
+			panic("coinbase must be set before adding transactions")
+		}
+		panic("coinbase can only be set once")
+	}
+	b.header.MixDigest = addr.Hash()
+	b.gasPool = new(GasPool).AddGas(b.header.GasLimit)
+}
+
 // SetExtra sets the extra data field of the generated block.
 func (b *BlockGen) SetExtra(data []byte) {
 	b.header.Extra = data

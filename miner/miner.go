@@ -60,6 +60,7 @@ type Miner struct {
 	mux      *event.TypeMux
 	worker   *worker
 	coinbase common.Address
+	sealer   common.Address
 	eth      Backend
 	engine   consensus.Engine
 	exitCh   chan struct{}
@@ -209,6 +210,11 @@ func (miner *Miner) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
 func (miner *Miner) SetEtherbase(addr common.Address) {
 	miner.coinbase = addr
 	miner.worker.setEtherbase(addr)
+}
+
+func (miner *Miner) SetSealer(addr common.Address) {
+	miner.sealer = addr
+	miner.worker.setSealer(addr)
 }
 
 // SetGasCeil sets the gaslimit to strive for when mining blocks post 1559.

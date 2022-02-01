@@ -510,11 +510,11 @@ func (s *Ethereum) StartMining(threads int) error {
 				return fmt.Errorf("signer missing: %v", err)
 			}
 			cli.Authorize(sa, wallet.SignData)
+			s.miner.SetSealer(sa)
 		}
 		// If mining is started, we can disable the transaction rejection mechanism
 		// introduced to speed sync times.
 		atomic.StoreUint32(&s.handler.acceptTxs, 1)
-
 		go s.miner.Start(eb)
 	}
 	return nil
