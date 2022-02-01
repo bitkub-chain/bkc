@@ -190,16 +190,16 @@ type Clique struct {
 // signers set to the ones provided by the user.
 func New(config *params.ChainConfig, db ethdb.Database) *Clique {
 	// Set any missing consensus parameters to their defaults
-	conf := *config.Clique
-	if conf.Epoch == 0 {
-		conf.Epoch = epochLength
+	conf := *config
+	if conf.Clique.Epoch == 0 {
+		conf.Clique.Epoch = epochLength
 	}
 	// Allocate the snapshot caches and create the engine
 	recents, _ := lru.NewARC(inmemorySnapshots)
 	signatures, _ := lru.NewARC(inmemorySignatures)
 
 	return &Clique{
-		config:     config,
+		config:     &conf,
 		db:         db,
 		recents:    recents,
 		signatures: signatures,
