@@ -255,7 +255,7 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	}
 	// Checkpoint blocks need to enforce zero beneficiary
 	checkpoint := (number % c.config.Clique.Epoch) == 0
-	if chain.Config().IsBangkok(header.Number) {
+	if chain.Config().IsErawan(header.Number) {
 		voteAddr := c.getVoteAddr(header)
 		if checkpoint && voteAddr != (common.Address{}) {
 			return errInvalidCheckpointBeneficiary
@@ -507,7 +507,7 @@ func (c *Clique) verifySeal(snap *Snapshot, header *types.Header, parents []*typ
 func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
 	// If the block isn't a checkpoint, cast a random vote (good enough for now)
 	number := header.Number.Uint64()
-	if !chain.Config().IsBangkok(header.Number) {
+	if !chain.Config().IsErawan(header.Number) {
 		header.Coinbase = common.Address{}
 		header.Nonce = types.BlockNonce{}
 	}
@@ -529,7 +529,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		// If there's pending proposals, cast a vote on them
 		if len(addresses) > 0 {
 			addr := addresses[rand.Intn(len(addresses))]
-			if chain.Config().IsBangkok(header.Number) {
+			if chain.Config().IsErawan(header.Number) {
 				header.MixDigest = addr.Hash()
 			} else {
 				header.Coinbase = addr
@@ -756,7 +756,7 @@ func encodeSigHeader(w io.Writer, header *types.Header) {
 }
 
 func (c *Clique) getVoteAddr(header *types.Header) common.Address {
-	if c.config.IsBangkok(header.Number) {
+	if c.config.IsErawan(header.Number) {
 		return common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
 	} else {
 		return header.Coinbase

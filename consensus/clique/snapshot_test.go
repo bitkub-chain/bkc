@@ -505,14 +505,14 @@ func TestClique(t *testing.T) {
 	}
 }
 
-func TestCliqueBangkokTransition(t *testing.T) {
+func TestCliqueErawanTransition(t *testing.T) {
 	// Define the various voting scenarios to test
 	tests := []struct {
-		epoch        uint64
-		signers      []string
-		votes        []testerVote
-		results      []string
-		bangkokBlock *big.Int
+		epoch       uint64
+		signers     []string
+		votes       []testerVote
+		results     []string
+		erawanBlock *big.Int
 	}{
 		{
 			// Single signer, voting to add two others (only accept first, second needs 2 votes)
@@ -522,8 +522,8 @@ func TestCliqueBangkokTransition(t *testing.T) {
 				{signer: "B"},
 				{signer: "A", voted: "C", auth: true},
 			},
-			results:      []string{"A", "B"},
-			bangkokBlock: big.NewInt(2),
+			results:     []string{"A", "B"},
+			erawanBlock: big.NewInt(2),
 		}, {
 			// Two signers, voting to add three others (only accept first two, third needs 3 votes already)
 			signers: []string{"A", "B"},
@@ -536,8 +536,8 @@ func TestCliqueBangkokTransition(t *testing.T) {
 				{signer: "A", voted: "E", auth: true},
 				{signer: "B", voted: "E", auth: true},
 			},
-			results:      []string{"A", "B", "C", "D"},
-			bangkokBlock: big.NewInt(4),
+			results:     []string{"A", "B", "C", "D"},
+			erawanBlock: big.NewInt(4),
 		}, {
 			// Two signers, actually needing mutual consent to drop either of them (fulfilled)
 			signers: []string{"A", "B"},
@@ -545,8 +545,8 @@ func TestCliqueBangkokTransition(t *testing.T) {
 				{signer: "A", voted: "B", auth: false},
 				{signer: "B", voted: "B", auth: false},
 			},
-			results:      []string{"A"},
-			bangkokBlock: big.NewInt(2),
+			results:     []string{"A"},
+			erawanBlock: big.NewInt(2),
 		}, {
 			// Three signers, two of them deciding to drop the third
 			signers: []string{"A", "B", "C"},
@@ -554,8 +554,8 @@ func TestCliqueBangkokTransition(t *testing.T) {
 				{signer: "A", voted: "C", auth: false},
 				{signer: "B", voted: "C", auth: false},
 			},
-			results:      []string{"A", "B"},
-			bangkokBlock: big.NewInt(2),
+			results:     []string{"A", "B"},
+			erawanBlock: big.NewInt(2),
 		},
 	}
 	// Run through the scenarios and test them
@@ -588,7 +588,7 @@ func TestCliqueBangkokTransition(t *testing.T) {
 
 		// Assemble a chain of headers from the cast votes
 		config := *params.TestChainConfig
-		config.BangkokBlock = tt.bangkokBlock
+		config.ErawanBlock = tt.erawanBlock
 		config.MuirGlacierBlock = nil
 		config.BerlinBlock = nil
 		config.LondonBlock = nil
@@ -603,7 +603,7 @@ func TestCliqueBangkokTransition(t *testing.T) {
 
 		blocks, _ := core.GenerateChain(&config, genesis.ToBlock(db), engine, db, len(tt.votes), func(j int, gen *core.BlockGen) {
 			// Cast the vote contained in this block
-			if config.IsBangkok(gen.Number()) {
+			if config.IsErawan(gen.Number()) {
 				gen.SetMixDigest(accounts.address(tt.votes[j].voted))
 			} else {
 				gen.SetCoinbase(accounts.address(tt.votes[j].voted))
