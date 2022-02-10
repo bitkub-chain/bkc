@@ -327,7 +327,7 @@ func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
 }
 
 func (s *Snapshot) getVoteAddr(header *types.Header) common.Address {
-	if s.config.IsBangkok(header.Number) {
+	if s.config.IsErawan(header.Number) {
 		return common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
 	} else {
 		return header.Coinbase

@@ -525,7 +525,7 @@ func (w *worker) mainLoop() {
 				}
 				w.mu.RLock()
 				beneficiary := w.coinbase
-				if !w.chainConfig.IsBangkok(w.current.header.Number) {
+				if !w.chainConfig.IsErawan(w.current.header.Number) {
 					beneficiary = w.sealer
 				}
 				w.mu.RUnlock()
@@ -1025,7 +1025,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 		}
 	}
 	beneficiary := w.coinbase
-	if !w.chainConfig.IsBangkok(w.current.header.Number) {
+	if !w.chainConfig.IsErawan(w.current.header.Number) {
 		beneficiary = w.sealer
 	}
 

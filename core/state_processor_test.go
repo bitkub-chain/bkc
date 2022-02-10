@@ -51,7 +51,7 @@ func TestStateProcessorErrors(t *testing.T) {
 			ConstantinopleBlock: big.NewInt(0),
 			PetersburgBlock:     big.NewInt(0),
 			IstanbulBlock:       big.NewInt(0),
-			BangkokBlock:        big.NewInt(0),
+			ErawanBlock:         big.NewInt(0),
 			MuirGlacierBlock:    big.NewInt(0),
 			BerlinBlock:         big.NewInt(0),
 			LondonBlock:         big.NewInt(0),
@@ -224,7 +224,7 @@ func TestStateProcessorErrors(t *testing.T) {
 					ConstantinopleBlock: big.NewInt(0),
 					PetersburgBlock:     big.NewInt(0),
 					IstanbulBlock:       big.NewInt(0),
-					BangkokBlock:        big.NewInt(0),
+					ErawanBlock:         big.NewInt(0),
 					MuirGlacierBlock:    big.NewInt(0),
 				},
 				Alloc: GenesisAlloc{

@@ -60,10 +60,10 @@ func TestCreation(t *testing.T) {
 				{7279999, ID{Hash: checksumToBytes(0xa00bc324), Next: 7280000}},   // Last Byzantium block
 				{7280000, ID{Hash: checksumToBytes(0x668db0af), Next: 9069000}},   // First and last Constantinople, first Petersburg block
 				{9068999, ID{Hash: checksumToBytes(0x668db0af), Next: 9069000}},   // Last Petersburg block
-				{9069000, ID{Hash: checksumToBytes(0x879d6e30), Next: 9100000}},   // First Istanbul and first Bangkok block
-				{9099999, ID{Hash: checksumToBytes(0x879d6e30), Next: 9100000}},   // Last Istanbul and first Bangkok block
-				{9100000, ID{Hash: checksumToBytes(0xae278308), Next: 9200000}},   // First Bangkok and first Muir Glacier block
-				{9199999, ID{Hash: checksumToBytes(0xae278308), Next: 9200000}},   // Last Bangkok and first Muir Glacier block
+				{9069000, ID{Hash: checksumToBytes(0x879d6e30), Next: 9100000}},   // First Istanbul and first Erawan block
+				{9099999, ID{Hash: checksumToBytes(0x879d6e30), Next: 9100000}},   // Last Istanbul and first Erawan block
+				{9100000, ID{Hash: checksumToBytes(0xae278308), Next: 9200000}},   // First Erawan and first Muir Glacier block
+				{9199999, ID{Hash: checksumToBytes(0xae278308), Next: 9200000}},   // Last Erawan and first Muir Glacier block
 				{9200000, ID{Hash: checksumToBytes(0xa3f61be8), Next: 12244000}},  // First Muir Glacier block
 				{12243999, ID{Hash: checksumToBytes(0xa3f61be8), Next: 12244000}}, // Last Muir Glacier block
 				{12244000, ID{Hash: checksumToBytes(0xb2716dde), Next: 12965000}}, // First Berlin block
@@ -91,8 +91,8 @@ func TestCreation(t *testing.T) {
 				{6485845, ID{Hash: checksumToBytes(0xd6e2149b), Next: 6485846}},   // Last Petersburg block
 				{6485846, ID{Hash: checksumToBytes(0x4bc66396), Next: 7000000}},   // First Istanbul block
 				{6999999, ID{Hash: checksumToBytes(0x4bc66396), Next: 7000000}},   // Last Istanbul block
-				{7000000, ID{Hash: checksumToBytes(0x4c47e751), Next: 7117117}},   // First Bangkok block
-				{7117116, ID{Hash: checksumToBytes(0x4c47e751), Next: 7117117}},   // Last Bangkok block
+				{7000000, ID{Hash: checksumToBytes(0x4c47e751), Next: 7117117}},   // First Erawan block
+				{7117116, ID{Hash: checksumToBytes(0x4c47e751), Next: 7117117}},   // Last Erawan block
 				{7117117, ID{Hash: checksumToBytes(0x0cd17432), Next: 9812189}},   // First Muir Glacier block
 				{9812188, ID{Hash: checksumToBytes(0x0cd17432), Next: 9812189}},   // Last Muir Glacier block
 				{9812189, ID{Hash: checksumToBytes(0x89d9ad18), Next: 10499401}},  // First Berlin block
@@ -119,8 +119,8 @@ func TestCreation(t *testing.T) {
 				{5435344, ID{Hash: checksumToBytes(0xafec6b27), Next: 5435345}}, // Last Petersburg block
 				{5435345, ID{Hash: checksumToBytes(0xcbdb8838), Next: 6000000}}, // First Istanbul block
 				{5999999, ID{Hash: checksumToBytes(0xcbdb8838), Next: 6000000}}, // Last Istanbul block
-				{6000000, ID{Hash: checksumToBytes(0x6db3a265), Next: 8290928}}, // First Bangkok block
-				{8290927, ID{Hash: checksumToBytes(0x6db3a265), Next: 8290928}}, // Last Bangkok block
+				{6000000, ID{Hash: checksumToBytes(0x6db3a265), Next: 8290928}}, // First Erawan block
+				{8290927, ID{Hash: checksumToBytes(0x6db3a265), Next: 8290928}}, // Last Erawan block
 				{8290928, ID{Hash: checksumToBytes(0xd73eaf79), Next: 8897988}}, // First Berlin block
 				{8897987, ID{Hash: checksumToBytes(0xd73eaf79), Next: 8897988}}, // Last Berlin block
 				{8897988, ID{Hash: checksumToBytes(0xac851b66), Next: 0}},       // First London block
@@ -136,8 +136,8 @@ func TestCreation(t *testing.T) {
 				{1561650, ID{Hash: checksumToBytes(0xa3f5ab08), Next: 1561651}}, // Last Petersburg block
 				{1561651, ID{Hash: checksumToBytes(0xc25efa5c), Next: 2000000}}, // First Istanbul block
 				{1999999, ID{Hash: checksumToBytes(0xc25efa5c), Next: 2000000}}, // Last Istanbul block
-				{2000000, ID{Hash: checksumToBytes(0xa61bde5e), Next: 4460644}}, // First Bangkok block
-				{4460643, ID{Hash: checksumToBytes(0xa61bde5e), Next: 4460644}}, // Last Bangkok block
+				{2000000, ID{Hash: checksumToBytes(0xa61bde5e), Next: 4460644}}, // First Erawan block
+				{4460643, ID{Hash: checksumToBytes(0xa61bde5e), Next: 4460644}}, // Last Erawan block
 				{4460644, ID{Hash: checksumToBytes(0x3f8a4ce7), Next: 5062605}}, // First Berlin block
 				{5000000, ID{Hash: checksumToBytes(0x3f8a4ce7), Next: 5062605}}, // Last Berlin block
 				{5062605, ID{Hash: checksumToBytes(0x368f7e57), Next: 0}},       // First London block
@@ -163,10 +163,10 @@ func TestCreation(t *testing.T) {
 				{7279999, ID{Hash: checksumToBytes(0xa00bc324), Next: 7280000}},   // Last Byzantium block
 				{7280000, ID{Hash: checksumToBytes(0x668db0af), Next: 9069000}},   // First and last Constantinople, first Petersburg block
 				{9068999, ID{Hash: checksumToBytes(0x668db0af), Next: 9069000}},   // Last Petersburg block
-				{9069000, ID{Hash: checksumToBytes(0x879d6e30), Next: 9100000}},   // First Istanbul and first Bangkok block
-				{9099999, ID{Hash: checksumToBytes(0x879d6e30), Next: 9100000}},   // Last Istanbul and first Bangkok block
-				{9100000, ID{Hash: checksumToBytes(0xae278308), Next: 9200000}},   // First Bangkok and first Muir Glacier block
-				{9199999, ID{Hash: checksumToBytes(0xae278308), Next: 9200000}},   // Last Bangkok and first Muir Glacier block
+				{9069000, ID{Hash: checksumToBytes(0x879d6e30), Next: 9100000}},   // First Istanbul and first Erawan block
+				{9099999, ID{Hash: checksumToBytes(0x879d6e30), Next: 9100000}},   // Last Istanbul and first Erawan block
+				{9100000, ID{Hash: checksumToBytes(0xae278308), Next: 9200000}},   // First Erawan and first Muir Glacier block
+				{9199999, ID{Hash: checksumToBytes(0xae278308), Next: 9200000}},   // Last Erawan and first Muir Glacier block
 				{9200000, ID{Hash: checksumToBytes(0xa3f61be8), Next: 12244000}},  // First Muir Glacier block
 				{12243999, ID{Hash: checksumToBytes(0xa3f61be8), Next: 12244000}}, // Last Muir Glacier block
 				{12244000, ID{Hash: checksumToBytes(0xb2716dde), Next: 12965000}}, // First Berlin block
