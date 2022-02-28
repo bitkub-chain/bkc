@@ -1079,7 +1079,7 @@ func (w *worker) fillTransactions(interrupt *int32, env *environment) {
 		}
 	}
 	env.beneficiary = w.coinbase
-	if !w.chainConfig.IsErawan(w.current.header.Number) {
+	if !w.chainConfig.IsErawan(env.header.Number) {
 		env.beneficiary = w.sealer
 	}
 
