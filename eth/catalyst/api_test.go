@@ -238,6 +238,7 @@ func TestInvalidPayloadTimestamp(t *testing.T) {
 
 func TestEth2NewBlock(t *testing.T) {
 	genesis, preMergeBlocks := generatePreMergeChain(10)
+	genesis.Config.ErawanBlock = nil
 	n, ethservice := startEthService(t, genesis, preMergeBlocks)
 	ethservice.Merger().ReachTTD()
 	defer n.Close()
@@ -409,6 +410,7 @@ func startEthService(t *testing.T, genesis *core.Genesis, blocks []*types.Block)
 
 func TestFullAPI(t *testing.T) {
 	genesis, preMergeBlocks := generatePreMergeChain(10)
+	genesis.Config.ErawanBlock = nil
 	n, ethservice := startEthService(t, genesis, preMergeBlocks)
 	ethservice.Merger().ReachTTD()
 	defer n.Close()

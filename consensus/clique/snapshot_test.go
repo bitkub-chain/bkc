@@ -416,7 +416,11 @@ func TestClique(t *testing.T) {
 
 		blocks, _ := core.GenerateChain(&config, genesis.ToBlock(db), engine, db, len(tt.votes), func(j int, gen *core.BlockGen) {
 			// Cast the vote contained in this block
+			// if config.IsErawan(gen.Number()) {
 			gen.SetMixDigest(accounts.address(tt.votes[j].voted))
+			// } else {
+			// 	gen.SetCoinbase(accounts.address(tt.votes[j].voted))
+			// }
 			if tt.votes[j].auth {
 				var nonce types.BlockNonce
 				copy(nonce[:], nonceAuthVote)

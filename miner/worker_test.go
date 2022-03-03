@@ -532,7 +532,8 @@ func TestGetSealingWorkEthash(t *testing.T) {
 }
 
 func TestGetSealingWorkClique(t *testing.T) {
-	testGetSealingWork(t, cliqueChainConfig, clique.New(cliqueChainConfig.Clique, rawdb.NewMemoryDatabase()), false)
+	cliqueChainConfig.ErawanBlock = nil
+	testGetSealingWork(t, cliqueChainConfig, clique.New(cliqueChainConfig, rawdb.NewMemoryDatabase()), false)
 }
 
 func TestGetSealingWorkPostMerge(t *testing.T) {
