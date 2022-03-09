@@ -170,8 +170,8 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache) (common.Address, er
 // Clique is the proof-of-authority consensus engine proposed to support the
 // Ethereum testnet following the Ropsten attacks.
 type Clique struct {
-	config *params.CliqueConfig // Consensus engine configuration parameters
-	db     ethdb.Database       // Database to store and retrieve snapshot checkpoints
+	config *params.ChainConfig // Consensus engine configuration parameters
+	db     ethdb.Database      // Database to store and retrieve snapshot checkpoints
 
 	recents    *lru.ARCCache // Snapshots for recent block to speed up reorgs
 	signatures *lru.ARCCache // Signatures of recent blocks to speed up mining
@@ -188,11 +188,11 @@ type Clique struct {
 
 // New creates a Clique proof-of-authority consensus engine with the initial
 // signers set to the ones provided by the user.
-func New(config *params.CliqueConfig, db ethdb.Database) *Clique {
+func New(config *params.ChainConfig, db ethdb.Database) *Clique {
 	// Set any missing consensus parameters to their defaults
 	conf := *config
-	if conf.Epoch == 0 {
-		conf.Epoch = epochLength
+	if conf.Clique.Epoch == 0 {
+		conf.Clique.Epoch = epochLength
 	}
 	// Allocate the snapshot caches and create the engine
 	recents, _ := lru.NewARC(inmemorySnapshots)
@@ -254,9 +254,19 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 		return consensus.ErrFutureBlock
 	}
 	// Checkpoint blocks need to enforce zero beneficiary
-	checkpoint := (number % c.config.Epoch) == 0
-	if checkpoint && header.Coinbase != (common.Address{}) {
-		return errInvalidCheckpointBeneficiary
+	checkpoint := (number % c.config.Clique.Epoch) == 0
+	if chain.Config().IsErawan(header.Number) {
+		voteAddr := c.getVoteAddr(header)
+		if checkpoint && voteAddr != (common.Address{}) {
+			return errInvalidCheckpointBeneficiary
+		}
+	} else {
+		if checkpoint && header.Coinbase != (common.Address{}) {
+			return errInvalidCheckpointBeneficiary
+		}
+		if header.MixDigest != (common.Hash{}) {
+			return errInvalidMixDigest
+		}
 	}
 	// Nonces must be 0x00..0 or 0xff..f, zeroes enforced on checkpoints
 	if !bytes.Equal(header.Nonce[:], nonceAuthVote) && !bytes.Equal(header.Nonce[:], nonceDropVote) {
@@ -280,10 +290,7 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	if checkpoint && signersBytes%common.AddressLength != 0 {
 		return errInvalidCheckpointSigners
 	}
-	// Ensure that the mix digest is zero as we don't have fork protection currently
-	if header.MixDigest != (common.Hash{}) {
-		return errInvalidMixDigest
-	}
+
 	// Ensure that the block doesn't contain any uncles which are meaningless in PoA
 	if header.UncleHash != uncleHash {
 		return errInvalidUncleHash
@@ -326,7 +333,7 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 	if parent == nil || parent.Number.Uint64() != number-1 || parent.Hash() != header.ParentHash {
 		return consensus.ErrUnknownAncestor
 	}
-	if parent.Time+c.config.Period > header.Time {
+	if parent.Time+c.config.Clique.Period > header.Time {
 		return errInvalidTimestamp
 	}
 	// Verify that the gasUsed is <= gasLimit
@@ -351,7 +358,7 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 		return err
 	}
 	// If the block is a checkpoint block, verify the signer list
-	if number%c.config.Epoch == 0 {
+	if number%c.config.Clique.Epoch == 0 {
 		signers := make([]byte, len(snap.Signers)*common.AddressLength)
 		for i, signer := range snap.signers() {
 			copy(signers[i*common.AddressLength:], signer[:])
@@ -390,7 +397,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		// at a checkpoint block without a parent (light client CHT), or we have piled
 		// up more headers than allowed to be reorged (chain reinit from a freezer),
 		// consider the checkpoint trusted and snapshot it.
-		if number == 0 || (number%c.config.Epoch == 0 && (len(headers) > params.FullImmutabilityThreshold || chain.GetHeaderByNumber(number-1) == nil)) {
+		if number == 0 || (number%c.config.Clique.Epoch == 0 && (len(headers) > params.FullImmutabilityThreshold || chain.GetHeaderByNumber(number-1) == nil)) {
 			checkpoint := chain.GetHeaderByNumber(number)
 			if checkpoint != nil {
 				hash := checkpoint.Hash()
@@ -426,6 +433,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		headers = append(headers, header)
 		number, hash = number-1, header.ParentHash
 	}
+
 	// Previous snapshot found, apply any pending headers on top of it
 	for i := 0; i < len(headers)/2; i++ {
 		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
@@ -498,16 +506,17 @@ func (c *Clique) verifySeal(snap *Snapshot, header *types.Header, parents []*typ
 // header for running the transactions on top.
 func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
 	// If the block isn't a checkpoint, cast a random vote (good enough for now)
-	header.Coinbase = common.Address{}
-	header.Nonce = types.BlockNonce{}
-
 	number := header.Number.Uint64()
+	if !chain.Config().IsErawan(header.Number) {
+		header.Coinbase = common.Address{}
+		header.Nonce = types.BlockNonce{}
+	}
 	// Assemble the voting snapshot to check which votes make sense
 	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil)
 	if err != nil {
 		return err
 	}
-	if number%c.config.Epoch != 0 {
+	if number%c.config.Clique.Epoch != 0 {
 		c.lock.RLock()
 
 		// Gather all the proposals that make sense voting on
@@ -519,8 +528,13 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		}
 		// If there's pending proposals, cast a vote on them
 		if len(addresses) > 0 {
-			header.Coinbase = addresses[rand.Intn(len(addresses))]
-			if c.proposals[header.Coinbase] {
+			addr := addresses[rand.Intn(len(addresses))]
+			if chain.Config().IsErawan(header.Number) {
+				header.MixDigest = addr.Hash()
+			} else {
+				header.Coinbase = addr
+			}
+			if c.proposals[addr] {
 				copy(header.Nonce[:], nonceAuthVote)
 			} else {
 				copy(header.Nonce[:], nonceDropVote)
@@ -537,22 +551,19 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	}
 	header.Extra = header.Extra[:extraVanity]
 
-	if number%c.config.Epoch == 0 {
+	if number%c.config.Clique.Epoch == 0 {
 		for _, signer := range snap.signers() {
 			header.Extra = append(header.Extra, signer[:]...)
 		}
 	}
 	header.Extra = append(header.Extra, make([]byte, extraSeal)...)
 
-	// Mix digest is reserved for now, set to empty
-	header.MixDigest = common.Hash{}
-
 	// Ensure the timestamp has the correct delay
 	parent := chain.GetHeader(header.ParentHash, number-1)
 	if parent == nil {
 		return consensus.ErrUnknownAncestor
 	}
-	header.Time = parent.Time + c.config.Period
+	header.Time = parent.Time + c.config.Clique.Period
 	if header.Time < uint64(time.Now().Unix()) {
 		header.Time = uint64(time.Now().Unix())
 	}
@@ -598,7 +609,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		return errUnknownBlock
 	}
 	// For 0-period chains, refuse to seal empty blocks (no reward but would spin sealing)
-	if c.config.Period == 0 && len(block.Transactions()) == 0 {
+	if c.config.Clique.Period == 0 && len(block.Transactions()) == 0 {
 		return errors.New("sealing paused while waiting for transactions")
 	}
 	// Don't hold the signer fields for the entire sealing procedure
@@ -741,5 +752,13 @@ func encodeSigHeader(w io.Writer, header *types.Header) {
 	}
 	if err := rlp.Encode(w, enc); err != nil {
 		panic("can't encode: " + err.Error())
+	}
+}
+
+func (c *Clique) getVoteAddr(header *types.Header) common.Address {
+	if c.config.IsErawan(header.Number) {
+		return common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
+	} else {
+		return header.Coinbase
 	}
 }

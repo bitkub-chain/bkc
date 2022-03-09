@@ -45,7 +45,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth"
-	"github.com/ethereum/go-ethereum/eth/catalyst"
+	ethcatalyst "github.com/ethereum/go-ethereum/eth/catalyst"
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/eth/gasprice"
@@ -56,6 +56,7 @@ import (
 	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"github.com/ethereum/go-ethereum/internal/flags"
 	"github.com/ethereum/go-ethereum/les"
+	lescatalyst "github.com/ethereum/go-ethereum/les/catalyst"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/metrics/exp"
@@ -465,6 +466,11 @@ var (
 		Usage: "Public address for block mining rewards (default = first account)",
 		Value: "0",
 	}
+	MinerSealerAddressFlag = cli.StringFlag{
+		Name:  "miner.sealerAddress",
+		Usage: "Address for sealing blocks (default = first account)",
+		Value: "0",
+	}
 	MinerExtraDataFlag = cli.StringFlag{
 		Name:  "miner.extradata",
 		Usage: "Block extra data set by the miner (default = client version)",
@@ -789,11 +795,6 @@ var (
 		Usage: "InfluxDB organization name (v2 only)",
 		Value: metrics.DefaultConfig.InfluxDBOrganization,
 	}
-
-	CatalystFlag = cli.BoolFlag{
-		Name:  "catalyst",
-		Usage: "Catalyst mode (eth2 integration testing)",
-	}
 )
 
 // MakeDataDir retrieves the currently requested data directory, terminating
@@ -1116,6 +1117,28 @@ func setEtherbase(ctx *cli.Context, ks *keystore.KeyStore, cfg *ethconfig.Config
 			cfg.Miner.Etherbase = account.Address
 		} else {
 			Fatalf("No etherbase configured")
+		}
+	}
+}
+
+// setSealerAddress retrieves the sealer address either from the directly specified
+// command line flags or from the keystore if CLI indexed.
+func setSealerAddress(ctx *cli.Context, ks *keystore.KeyStore, cfg *ethconfig.Config) {
+	// Extract the current sealer address
+	var sealerAddress string
+	if ctx.GlobalIsSet(MinerSealerAddressFlag.Name) {
+		sealerAddress = ctx.GlobalString(MinerSealerAddressFlag.Name)
+	}
+	// Convert the sealer address into an address and configure it
+	if sealerAddress != "" {
+		if ks != nil {
+			account, err := MakeAddress(ks, sealerAddress)
+			if err != nil {
+				Fatalf("Invalid miner sealer address: %v", err)
+			}
+			cfg.Miner.SealerAddress = account.Address
+		} else {
+			Fatalf("No sealer address configured")
 		}
 	}
 }
@@ -1490,6 +1513,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		ks = keystores[0].(*keystore.KeyStore)
 	}
 	setEtherbase(ctx, ks, cfg)
+	setSealerAddress(ctx, ks, cfg)
 	setGPO(ctx, &cfg.GPO, ctx.GlobalString(SyncModeFlag.Name) == "light")
 	setTxPool(ctx, &cfg.TxPool)
 	setEthash(ctx, cfg)
@@ -1654,9 +1678,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			// when we're definitely concerned with only one account.
 			passphrase = list[0]
 		}
-		// setEtherbase has been called above, configuring the miner address from command line flags.
-		if cfg.Miner.Etherbase != (common.Address{}) {
-			developer = accounts.Account{Address: cfg.Miner.Etherbase}
+		// setSealerAddress has been called above, configuring the miner address from command line flags.
+		if cfg.Miner.SealerAddress != (common.Address{}) {
+			developer = accounts.Account{Address: cfg.Miner.SealerAddress}
 		} else if accs := ks.Accounts(); len(accs) > 0 {
 			developer = ks.Accounts()[0]
 		} else {
@@ -1673,9 +1697,15 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		// Create a new developer genesis block or reuse existing one
 		cfg.Genesis = core.DeveloperGenesisBlock(uint64(ctx.GlobalInt(DeveloperPeriodFlag.Name)), ctx.GlobalUint64(DeveloperGasLimitFlag.Name), developer.Address)
 		if ctx.GlobalIsSet(DataDirFlag.Name) {
+			// If datadir doesn't exist we need to open db in write-mode
+			// so leveldb can create files.
+			readonly := true
+			if !common.FileExist(stack.ResolvePath("chaindata")) {
+				readonly = false
+			}
 			// Check if we have an already initialized chain and fall back to
 			// that if so. Otherwise we need to generate a new genesis spec.
-			chaindb := MakeChainDatabase(ctx, stack, false) // TODO (MariusVanDerWijden) make this read only
+			chaindb := MakeChainDatabase(ctx, stack, readonly)
 			if rawdb.ReadCanonicalHash(chaindb, 0) != (common.Hash{}) {
 				cfg.Genesis = nil // fallback to db content
 			}
@@ -1710,15 +1740,15 @@ func SetDNSDiscoveryDefaults(cfg *ethconfig.Config, genesis common.Hash) {
 // RegisterEthService adds an Ethereum client to the stack.
 // The second return value is the full node instance, which may be nil if the
 // node is running as a light client.
-func RegisterEthService(stack *node.Node, cfg *ethconfig.Config, isCatalyst bool) (ethapi.Backend, *eth.Ethereum) {
+func RegisterEthService(stack *node.Node, cfg *ethconfig.Config) (ethapi.Backend, *eth.Ethereum) {
 	if cfg.SyncMode == downloader.LightSync {
 		backend, err := les.New(stack, cfg)
 		if err != nil {
 			Fatalf("Failed to register the Ethereum service: %v", err)
 		}
 		stack.RegisterAPIs(tracers.APIs(backend.ApiBackend))
-		if isCatalyst {
-			if err := catalyst.RegisterLight(stack, backend); err != nil {
+		if backend.BlockChain().Config().TerminalTotalDifficulty != nil {
+			if err := lescatalyst.Register(stack, backend); err != nil {
 				Fatalf("Failed to register the catalyst service: %v", err)
 			}
 		}
@@ -1734,8 +1764,8 @@ func RegisterEthService(stack *node.Node, cfg *ethconfig.Config, isCatalyst bool
 			Fatalf("Failed to create the LES server: %v", err)
 		}
 	}
-	if isCatalyst {
-		if err := catalyst.Register(stack, backend); err != nil {
+	if backend.BlockChain().Config().TerminalTotalDifficulty != nil {
+		if err := ethcatalyst.Register(stack, backend); err != nil {
 			Fatalf("Failed to register the catalyst service: %v", err)
 		}
 	}
@@ -1885,7 +1915,7 @@ func MakeChain(ctx *cli.Context, stack *node.Node) (chain *core.BlockChain, chai
 	}
 	var engine consensus.Engine
 	if config.Clique != nil {
-		engine = clique.New(config.Clique, chainDb)
+		engine = clique.New(config, chainDb)
 	} else {
 		engine = ethash.NewFaker()
 		if !ctx.GlobalBool(FakePoWFlag.Name) {

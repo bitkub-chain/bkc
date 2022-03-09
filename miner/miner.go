@@ -35,23 +35,26 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 )
 
-// Backend wraps all methods required for mining.
+// Backend wraps all methods required for mining. Only full node is capable
+// to offer all the functions here.
 type Backend interface {
 	BlockChain() *core.BlockChain
 	TxPool() *core.TxPool
+	StateAtBlock(block *types.Block, reexec uint64, base *state.StateDB, checkLive bool, preferDisk bool) (statedb *state.StateDB, err error)
 }
 
 // Config is the configuration parameters of mining.
 type Config struct {
-	Etherbase  common.Address `toml:",omitempty"` // Public address for block mining rewards (default = first account)
-	Notify     []string       `toml:",omitempty"` // HTTP URL list to be notified of new work packages (only useful in ethash).
-	NotifyFull bool           `toml:",omitempty"` // Notify with pending block headers instead of work packages
-	ExtraData  hexutil.Bytes  `toml:",omitempty"` // Block extra data set by the miner
-	GasFloor   uint64         // Target gas floor for mined blocks.
-	GasCeil    uint64         // Target gas ceiling for mined blocks.
-	GasPrice   *big.Int       // Minimum gas price for mining a transaction
-	Recommit   time.Duration  // The time interval for miner to re-create mining work.
-	Noverify   bool           // Disable remote mining solution verification(only useful in ethash).
+	Etherbase     common.Address `toml:",omitempty"` // Public address for block mining rewards (default = first account)
+	SealerAddress common.Address `toml:",omitempty"` // Address for sealing blocks (default = first account)
+	Notify        []string       `toml:",omitempty"` // HTTP URL list to be notified of new work packages (only useful in ethash).
+	NotifyFull    bool           `toml:",omitempty"` // Notify with pending block headers instead of work packages
+	ExtraData     hexutil.Bytes  `toml:",omitempty"` // Block extra data set by the miner
+	GasFloor      uint64         // Target gas floor for mined blocks.
+	GasCeil       uint64         // Target gas ceiling for mined blocks.
+	GasPrice      *big.Int       // Minimum gas price for mining a transaction
+	Recommit      time.Duration  // The time interval for miner to re-create mining work.
+	Noverify      bool           // Disable remote mining solution verification(only useful in ethash).
 }
 
 // Miner creates blocks and searches for proof-of-work values.
@@ -59,6 +62,7 @@ type Miner struct {
 	mux      *event.TypeMux
 	worker   *worker
 	coinbase common.Address
+	sealer   common.Address
 	eth      Backend
 	engine   consensus.Engine
 	exitCh   chan struct{}
@@ -68,7 +72,7 @@ type Miner struct {
 	wg sync.WaitGroup
 }
 
-func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, engine consensus.Engine, isLocalBlock func(header *types.Header) bool, merger *consensus.Merger) *Miner {
+func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, engine consensus.Engine, isLocalBlock func(header *types.Header) bool) *Miner {
 	miner := &Miner{
 		eth:     eth,
 		mux:     mux,
@@ -76,7 +80,7 @@ func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *even
 		exitCh:  make(chan struct{}),
 		startCh: make(chan common.Address),
 		stopCh:  make(chan struct{}),
-		worker:  newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, true, merger),
+		worker:  newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, true),
 	}
 	miner.wg.Add(1)
 	go miner.update()
@@ -210,6 +214,11 @@ func (miner *Miner) SetEtherbase(addr common.Address) {
 	miner.worker.setEtherbase(addr)
 }
 
+func (miner *Miner) SetSealer(addr common.Address) {
+	miner.sealer = addr
+	miner.worker.setSealer(addr)
+}
+
 // SetGasCeil sets the gaslimit to strive for when mining blocks post 1559.
 // For pre-1559 blocks, it sets the ceiling.
 func (miner *Miner) SetGasCeil(ceil uint64) {
@@ -231,6 +240,12 @@ func (miner *Miner) EnablePreseal() {
 // which uses this library.
 func (miner *Miner) DisablePreseal() {
 	miner.worker.disablePreseal()
+}
+
+// GetSealingBlock retrieves a sealing block based on the given parameters.
+// The returned block is not sealed but all other fields should be filled.
+func (miner *Miner) GetSealingBlock(parent common.Hash, timestamp uint64, coinbase common.Address, random common.Hash) (*types.Block, error) {
+	return miner.worker.getSealingBlock(parent, timestamp, coinbase, random)
 }
 
 // SubscribePendingLogs starts delivering logs from pending transactions

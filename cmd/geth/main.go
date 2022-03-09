@@ -128,6 +128,7 @@ var (
 		utils.MinerGasLimitFlag,
 		utils.MinerGasPriceFlag,
 		utils.MinerEtherbaseFlag,
+		utils.MinerSealerAddressFlag,
 		utils.MinerExtraDataFlag,
 		utils.MinerRecommitIntervalFlag,
 		utils.MinerNoVerifyFlag,
@@ -157,7 +158,6 @@ var (
 		utils.GpoIgnoreGasPriceFlag,
 		utils.MinerNotifyFullFlag,
 		configFileFlag,
-		utils.CatalystFlag,
 	}
 
 	rpcFlags = []cli.Flag{

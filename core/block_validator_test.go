@@ -100,7 +100,7 @@ func testHeaderVerificationForMerging(t *testing.T, isClique bool) {
 		var (
 			key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 			addr   = crypto.PubkeyToAddress(key.PublicKey)
-			engine = clique.New(params.AllCliqueProtocolChanges.Clique, testdb)
+			engine = clique.New(params.AllCliqueProtocolChanges, testdb)
 		)
 		genspec := &Genesis{
 			ExtraData: make([]byte, 32+common.AddressLength+crypto.SignatureLength),
