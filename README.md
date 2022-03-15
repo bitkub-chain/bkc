@@ -32,7 +32,7 @@ mv ./build/bin/geth /usr/local/bin/
 ```
 
 ## Run from the binary
-The binary for a linux x86 architecture is provided in [release](https://github.com/bitkub-chain/bkc/releases/tag/v1.1.0-bkc)
+The binary for a linux x86 architecture is provided in [release](https://github.com/bitkub-blockchain/bkc/releases/tag/v1.1.0-bkc)
 
 
 ## Executables
