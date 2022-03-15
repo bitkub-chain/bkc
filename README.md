@@ -1,27 +1,47 @@
 # Bitkub Chain
+Bitkub Chain is an infrastructure of an ecosystem using decentralized technology “Blockchain” which allows anyone to interact with decentralized applications or their digital assets with a very low transaction fee, high-speed confirmation time, trustless and  transparency to everyone.
 
-Bitkub Chain is a fork of go-ethereum. When the chain start, it adopts Proof of Authority (PoA) consensus mechanism to allow short block time. Bitkub Chain will soon introduce Proof of Staked Authority (PoSA) according to the published [whitepaper](https://www.bitkubchain.com/docs/EN_Bitkub_Chain_WhitePaper_V2.1.pdf).
+Bitkub Chain is a fork of go-ethereum. When the chain starts, it adopts Proof of Authority (PoA) consensus mechanism to allow short block time. Bitkub Chain will soon introduce Proof of Staked Authority (PoSA) according to the published [whitepaper](https://www.bitkubchain.com/docs/EN_Bitkub_Chain_WhitePaper_V2.1.pdf).
 
 ## Proof of Staked Authority
 
-The PoSA of Bitkub Chain is composed of two parts. The first part is a set of smart contracts which handle staking and distributing reward. The second part is an extended version of go-ethereum's Clique consensus (PoA). Making it be able to send block's reward to the smart contract.
+The PoSA of Bitkub Chain comprises of two parts. The first part is a set of smart contract which handle staking and distributing reward. The second part is an extended version of go-ethereum's Clique consensus (PoA) to make it able to send block's reward to the smart contract.
 
-## Building the source
+## Compile the binary
 
-For prerequisites and detailed build instructions please read the [Installation Instructions](https://geth.ethereum.org/docs/install-and-build/installing-geth).
+Building `geth` requires both a Go (version 1.17 or later) and a C compiler. You can install them using your favourite package manager.
 
-Building `geth` requires both a Go (version 1.14 or later) and a C compiler. You can install
-them using your favourite package manager. Once the dependencies are installed run
+* Install Go
+
+```shell
+rm -rf /usr/local/go && curl -L https://golang.google.cn/dl/go1.17.6.linux-amd64.tar.gz | tar -C /usr/local -xz
+export PATH=$PATH:/usr/local/go/bin
+```
+
+* Clone bkc repository
+
+```shell
+# Will be changed to github
+git clone https://gitlab.com/bitkub-blockchain/bitkub-chain/bkc.git && cd bkc
+```
+* Build geth binary
 
 ```shell
 make geth
+mv ./build/bin/geth /usr/local/bin/
 ```
 
-or, to build the full suite of utilities:
+## Run from the binary
+The binary for a linux x86 architecture is provided in [release](https://github.com/bitkub-chain/bkc/releases/tag/v1.1.0-bkc)
 
-```shell
-make all
-```
+
+## Executables
+
+The bkc project comes with executable found in the `cmd` directory.
+
+|    Command    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| :-----------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|  **`geth`**   | Our Bitkub Chain CLI client. It is the entry point into the BKC network (main-, test- or private net), capable of running as a full node (default), archive node (retaining all historical state) or a light node (retrieving data live). It can be used by other processes as a gateway into the BKC network via JSON RPC endpoints exposed on top of HTTP, WebSocket and/or IPC transports. `geth --help` and the [CLI page](https://geth.ethereum.org/docs/interface/command-line-options) for command line options.          |
 
 ## Running `geth`
 
@@ -30,33 +50,86 @@ Going through all the possible command line flags is out of scope here (please c
 but we've enumerated a few common parameter combos to get you up to speed quickly
 on how you can run your own `geth` instance.
 
-### Hardware Requirements
-
-the hardware must meet certain requirements to run a full node.
-
+### Hardware Requirements (recommended)
 - 12 vCPUs
 - 48 GiB of RAM
 - 1 TB of Data Disk (SSD) IOPS: 20,000
 - Suggest m5zn.3xlarge instance type on AWS, or c2-standard-16 on Google cloud.
 - A broadband Internet connection with upload/download speeds of at least 50 megabyte per second
 
+#### Security Group & Firewall Rules
+##### Allow Inbound
+- Protocol - TCP & UDP
+- Port - 30303
+- Source IP - 0.0.0.0/0
+
+##### Network Bandwidth
+- 50 Mbps/Sec
+ 
+
 ```shell
 $ geth console
 ```
 
 This command will:
- * Start `geth` in snap sync mode (default, can be changed with the `--syncmode` flag),
-   causing it to download more data in exchange for avoiding processing the entire history
-   of the Bitkub Chain network, which is very CPU intensive.
- * Start up `geth`'s built-in interactive [JavaScript console](https://geth.ethereum.org/docs/interface/javascript-console),
-   (via the trailing `console` subcommand) through which you can interact using [`web3` methods](https://github.com/ChainSafe/web3.js/blob/0.20.7/DOCUMENTATION.md) 
-   (note: the `web3` version bundled within `geth` is very old, and not up to date with official docs),
-   as well as `geth`'s own [management APIs](https://geth.ethereum.org/docs/rpc/server).
-   This tool is optional and if you leave it out you can always attach to an already running
-   `geth` instance with `geth attach`.
+ * Start `geth` in snap sync mode (default, can be changed with the `--syncmode` flag), causing it to download more data in exchange for avoiding processing the entire history of the Bitkub Chain network, which is very CPU intensive.
+ * Start up `geth`'s built-in interactive [JavaScript console](https://geth.ethereum.org/docs/interface/javascript-console), (via the trailing `console` subcommand) through which you can interact using [`web3` methods](https://github.com/ChainSafe/web3.js/blob/0.20.7/DOCUMENTATION.md) (note: the `web3` version bundled within `geth` is very old, and not up to date with official docs), as well as `geth`'s own [management APIs](https://geth.ethereum.org/docs/rpc/server). This tool is optional and if you leave it out you can always attach to an already running `geth` instance with `geth attach`.
 
 ### A node on the Bitkub Chain network
-More details about how to run in [bkc-node](https://github.com/bitkub-blockchain/bkc-node).
+Download the following binary, configuration and genesis files according to the mainnet or the testnet.
+
+### Download chain configurations
+* Mainnet
+    * config.toml
+    ```shell
+    wget https://raw.githubusercontent.com/bitkub-blockchain/bkc-node/main/mainnet/config.toml
+    ```
+    * genesis.json
+    ```shell
+    wget https://raw.githubusercontent.com/bitkub-blockchain/bkc-node/main/mainnet/genesis.json
+    ```
+* Testnet
+     * config.toml
+    ```shell
+    wget https://raw.githubusercontent.com/bitkub-blockchain/bkc-node/main/testnet/config.toml
+    ```
+    * genesis.json
+    ```shell
+    wget https://raw.githubusercontent.com/bitkub-blockchain/bkc-node/main/testnet/genesis.json
+    ```
+    
+### RPC node running guideline
+
+* Initialize a genesis file
+```shell
+geth init --datadir { PATH } genesis.json
+```
+
+* Run node
+```shell
+geth --datadir { PATH } --config config.toml { any additional flags }
+```
+
+### Validator node running guideline
+
+* Initialize a genesis file
+```shell
+geth init --datadir { PATH } genesis.json
+```
+
+* Run node
+
+Before running `geth` command, make sure the reward address was set correctly. In the new `geth` binary that included the Erawan hard fork. The owner of the validator node can set either wallet address or smart contract address as a beneficially address by adding the flag `miner.etherbase`.
+
+|    Flag    | Required | Default |
+| - | :-: | - |
+|`--miner.sealerAddress`| ❌ | First unlocked account |
+|`--miner.etherbase`| ❌ | First unlocked account |
+
+```shell
+geth --datadir { PATH } --config config.toml --miner.etherbase { wallet/smart contract address} { any additional flags }
+```
+
 ### Configuration
 
 As an alternative to passing the numerous flags to the `geth` binary, you can also pass a
@@ -137,10 +210,10 @@ testing procedures.
 
 ## License
 
-The go-ethereum library (i.e. all code outside of the `cmd` directory) is licensed under the
+The bkc library (i.e. all code outside of the `cmd` directory) is licensed under the
 [GNU Lesser General Public License v3.0](https://www.gnu.org/licenses/lgpl-3.0.en.html),
 also included in our repository in the `COPYING.LESSER` file.
 
-The go-ethereum binaries (i.e. all code inside of the `cmd` directory) is licensed under the
+The bkc binaries (i.e. all code inside of the `cmd` directory) is licensed under the
 [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html), also
 included in our repository in the `COPYING` file.

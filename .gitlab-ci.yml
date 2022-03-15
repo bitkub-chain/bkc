@@ -1,0 +1,25 @@
+variables:
+  GO_INSTALL_VERSION: go1.17.1
+
+stages:
+  - build
+
+build-job:
+  image: ubuntu:18.04
+  stage: build
+  rules:
+    - if: $CI_COMMIT_TAG 
+  before_script:
+    - apt update && apt install curl git make gcc musl-dev python3 python3-pip -y
+    - pip3 install awscli
+    - aws --version
+
+  script: 
+    - curl -L https://golang.org/dl/$GO_INSTALL_VERSION.linux-amd64.tar.gz | tar -C /usr/local -xvz
+    - export PATH=$PATH:/usr/local/go/bin
+    - make geth
+    - tar -cvzf /tmp/geth.tar.gz build/bin/geth
+    - ls /tmp
+    - aws s3 ls
+    - aws s3 cp /tmp/geth.tar.gz s3://$AWS_S3_BUCKET/$CI_COMMIT_TAG/geth-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m).tar.gz
+
