@@ -157,6 +157,9 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache) (common.Address, er
 
 	// Recover the public key and the Ethereum address
 	pubkey, err := crypto.Ecrecover(SealHash(header).Bytes(), signature)
+	// log.Info("============ pubkey ============= : ", "pubkey", pubkey[1:])
+	// log.Info("============ pubkey ============= : ", "pubkey", crypto.Keccak256(pubkey[1:]))
+	log.Info("============ pubkey ============= : ", "pubkey", crypto.Keccak256(pubkey[1:])[12:])
 	if err != nil {
 		return common.Address{}, err
 	}
@@ -244,6 +247,7 @@ func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*typ
 // looking those up from the database. This is useful for concurrently verifying
 // a batch of new headers.
 func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
+	log.Info("=================== parents ==================== : ", "parents", parents)
 	if header.Number == nil {
 		return errUnknownBlock
 	}
@@ -481,14 +485,14 @@ func (c *Clique) verifySeal(snap *Snapshot, header *types.Header, parents []*typ
 	if _, ok := snap.Signers[signer]; !ok {
 		return errUnauthorizedSigner
 	}
-	for seen, recent := range snap.Recents {
-		if recent == signer {
-			// Signer is among recents, only fail if the current block doesn't shift it out
-			if limit := uint64(len(snap.Signers)/2 + 1); seen > number-limit {
-				return errRecentlySigned
-			}
-		}
-	}
+	// for seen, recent := range snap.Recents {
+	// 	if recent == signer {
+	// 		// Signer is among recents, only fail if the current block doesn't shift it out
+	// 		if limit := uint64(len(snap.Signers)/2 + 1); seen > number-limit {
+	// 			return errRecentlySigned
+	// 		}
+	// 	}
+	// }
 	// Ensure that the difficulty corresponds to the turn-ness of the signer
 	if !c.fakeDiff {
 		inturn := snap.inturn(header.Number.Uint64(), signer)
@@ -626,14 +630,14 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		return errUnauthorizedSigner
 	}
 	// If we're amongst the recent signers, wait for the next block
-	for seen, recent := range snap.Recents {
-		if recent == signer {
-			// Signer is among recents, only wait if the current block doesn't shift it out
-			if limit := uint64(len(snap.Signers)/2 + 1); number < limit || seen > number-limit {
-				return errors.New("signed recently, must wait for others")
-			}
-		}
-	}
+	// for seen, recent := range snap.Recents {
+	// 	if recent == signer {
+	// 		// Signer is among recents, only wait if the current block doesn't shift it out
+	// 		if limit := uint64(len(snap.Signers)/2 + 1); number < limit || seen > number-limit {
+	// 			return errors.New("signed recently, must wait for others")
+	// 		}
+	// 	}
+	// }
 	// Sweet, the protocol permits us to sign the block, wait for our time
 	delay := time.Unix(int64(header.Time), 0).Sub(time.Now()) // nolint: gosimple
 	if header.Difficulty.Cmp(diffNoTurn) == 0 {
@@ -644,27 +648,28 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
 	}
 	// Sign all the things!
-	sighash, err := signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, CliqueRLP(header))
-	if err != nil {
-		return err
+	if header.Difficulty.Cmp(diffNoTurn) == 0 {
+		sighash, err := signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, CliqueRLP(header))
+		if err != nil {
+			return err
+		}
+		copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
+		// Wait until sealing is terminated or delay timeout.
+		log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
+		go func() {
+			select {
+			case <-stop:
+				return
+			case <-time.After(delay):
+			}
+
+			select {
+			case results <- block.WithSeal(header):
+			default:
+				log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
+			}
+		}()
 	}
-	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
-	// Wait until sealing is terminated or delay timeout.
-	log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
-	go func() {
-		select {
-		case <-stop:
-			return
-		case <-time.After(delay):
-		}
-
-		select {
-		case results <- block.WithSeal(header):
-		default:
-			log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
-		}
-	}()
-
 	return nil
 }
 
@@ -682,7 +687,7 @@ func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, time uint64, 
 
 func calcDifficulty(snap *Snapshot, signer common.Address) *big.Int {
 	if snap.inturn(snap.Number+1, signer) {
-		return new(big.Int).Set(diffInTurn)
+		return new(big.Int).Set(diffInTurn) // set 2
 	}
 	return new(big.Int).Set(diffNoTurn)
 }
