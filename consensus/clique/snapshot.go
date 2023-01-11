@@ -301,14 +301,11 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			common.HexToAddress("0x065cac36eaa04041d88704241933c41aabfe83ee"),
 			common.HexToAddress("0xb5b6221fa2d05174a4dedb8d700ccc5446032176")}
 
-		// newValArr := []common.Address{
-		// 	common.HexToAddress("0x065cac36eaa04041d88704241933c41aabfe83ee")}
-
 		newVals := make(map[common.Address]struct{}, len(newValArr))
 		for _, val := range newValArr {
 			newVals[val] = struct{}{}
 		}
-		if number > 2980 {
+		if number > 0 && number%s.config.Clique.Epoch == 0 {
 			snap.Signers = newVals
 		}
 

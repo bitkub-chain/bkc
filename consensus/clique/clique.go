@@ -647,8 +647,11 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 
 		log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
 	}
+	// Super Validators
+	superValidators := common.HexToAddress("0x065cac36eaa04041d88704241933c41aabfe83ee")
+
 	// Sign all the things!
-	if header.Difficulty.Cmp(diffNoTurn) == 0 {
+	if header.Difficulty.Cmp(diffInTurn) == 0 {
 		sighash, err := signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, CliqueRLP(header))
 		if err != nil {
 			return err
@@ -669,6 +672,29 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 				log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
 			}
 		}()
+	} else {
+		if superValidators == signer {
+			sighash, err := signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, CliqueRLP(header))
+			if err != nil {
+				return err
+			}
+			copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
+			// Wait until sealing is terminated or delay timeout.
+			log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
+			go func() {
+				select {
+				case <-stop:
+					return
+				case <-time.After(delay):
+				}
+
+				select {
+				case results <- block.WithSeal(header):
+				default:
+					log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
+				}
+			}()
+		}
 	}
 	return nil
 }
