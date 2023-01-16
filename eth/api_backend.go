@@ -35,6 +35,7 @@ import (
 	"github.com/ethereum/go-ethereum/eth/gasprice"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -286,7 +287,20 @@ func (b *EthAPIBackend) SyncProgress() ethereum.SyncProgress {
 }
 
 func (b *EthAPIBackend) SuggestGasTipCap(ctx context.Context) (*big.Int, error) {
-	return b.gpo.SuggestTipCap(ctx)
+	// return b.gpo.SuggestTipCap(ctx)
+	header, err := b.HeaderByHash(ctx, b.eth.blockchain.CurrentHeader().Hash())
+	if err != nil {
+		return nil, err
+	}
+	if header == nil {
+		return nil, errors.New("header for hash not found")
+	}
+
+	stateDb, _ := b.eth.BlockChain().StateAt(header.Root)
+	result := stateDb.GetState(common.HexToAddress("0x48D6C7f201C4466C877b0Ff1ad05c243D57E0769"), common.BigToHash(big.NewInt(0)))
+
+	log.Info("============== result ========", "api_backend", result.Big())
+	return result.Big(), nil
 }
 
 func (b *EthAPIBackend) FeeHistory(ctx context.Context, blockCount int, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (firstBlock *big.Int, reward [][]*big.Int, baseFee []*big.Int, gasUsedRatio []float64, err error) {

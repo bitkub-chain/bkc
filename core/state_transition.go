@@ -26,6 +26,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -254,6 +255,15 @@ func (st *StateTransition) preCheck() error {
 				return fmt.Errorf("%w: address %v, maxFeePerGas: %s baseFee: %s", ErrFeeCapTooLow,
 					st.msg.From().Hex(), st.gasFeeCap, st.evm.Context.BaseFee)
 			}
+		}
+	}
+	// add check pos transition here!!!!
+	// check gasprice from
+	recommentGas := st.state.GetState(common.HexToAddress("0x48D6C7f201C4466C877b0Ff1ad05c243D57E0769"), common.BigToHash(big.NewInt(0))).Big()
+	log.Info("============= recommentGas =============", "state_transition", recommentGas)
+	if recommentGas.Cmp(big.NewInt(0)) > 0 {
+		if st.msg.GasPrice().Cmp(recommentGas) < 0 {
+			return fmt.Errorf("Error")
 		}
 	}
 	return st.buyGas()
