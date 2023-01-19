@@ -19,15 +19,19 @@ package clique
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -36,6 +40,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -182,13 +187,21 @@ type Clique struct {
 	signFn SignerFn       // Signer function to authorize hashes with
 	lock   sync.RWMutex   // Protects the signer fields
 
+	ethAPI          *ethapi.PublicBlockChainAPI
+	validatorSetABI abi.ABI
+	slashABI        abi.ABI
+
 	// The fields below are for testing only
 	fakeDiff bool // Skip difficulty verifications
 }
 
 // New creates a Clique proof-of-authority consensus engine with the initial
 // signers set to the ones provided by the user.
-func New(config *params.ChainConfig, db ethdb.Database) *Clique {
+func New(
+	config *params.ChainConfig,
+	db ethdb.Database,
+	ethAPI *ethapi.PublicBlockChainAPI,
+) *Clique {
 	// Set any missing consensus parameters to their defaults
 	conf := *config
 	if conf.Clique.Epoch == 0 {
@@ -198,12 +211,19 @@ func New(config *params.ChainConfig, db ethdb.Database) *Clique {
 	recents, _ := lru.NewARC(inmemorySnapshots)
 	signatures, _ := lru.NewARC(inmemorySignatures)
 
+	vABI, err := abi.JSON(strings.NewReader(validatorSetABI))
+	if err != nil {
+		panic(err)
+	}
+
 	return &Clique{
-		config:     &conf,
-		db:         db,
-		recents:    recents,
-		signatures: signatures,
-		proposals:  make(map[common.Address]bool),
+		config:          &conf,
+		db:              db,
+		recents:         recents,
+		signatures:      signatures,
+		ethAPI:          ethAPI,
+		validatorSetABI: vABI,
+		proposals:       make(map[common.Address]bool),
 	}
 }
 
@@ -521,6 +541,13 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		return err
 	}
 	if number%c.config.Clique.Epoch != 0 {
+		newValidators, err := c.getCurrentValidators(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1))
+		if err != nil {
+			return err
+		}
+		// sort validator by address
+		// sort.Sort(validatorsAscending(newValidators))
+		log.Info("====================newValidators====================", "newValidators", newValidators)
 		c.lock.RLock()
 
 		// Gather all the proposals that make sense voting on
@@ -665,7 +692,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
 	}
 	// Super Validators
-	superValidators := common.HexToAddress("0x065cac36eaa04041d88704241933c41aabfe83ee")
+	superValidators := common.HexToAddress("0x48f30fb9b69454b09f8b4691412cf4aa3753fcb1")
 
 	// Sign all the things!
 
@@ -755,6 +782,56 @@ func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 		Service:   &API{chain: chain, clique: c},
 		Public:    false,
 	}}
+}
+
+// ==========================  interaction with contract/account =========
+
+// getCurrentValidators get current validators
+func (c *Clique) getCurrentValidators(blockHash common.Hash, blockNumber *big.Int) ([]common.Address, error) {
+	// block
+	blockNr := rpc.BlockNumberOrHashWithHash(blockHash, false)
+
+	// method
+	method := "getValidators"
+	// if p.chainConfig.IsEuler(blockNumber) {
+	// 	method = "getMiningValidators"
+	// }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // cancel when we are finished consuming integers
+
+	data, err := c.validatorSetABI.Pack(method)
+	if err != nil {
+		log.Error("Unable to pack tx for getValidators", "error", err)
+		return nil, err
+	}
+	// call
+	msgData := (hexutil.Bytes)(data)
+	toAddress := common.HexToAddress("0xad6f3768C219e35a1e4D32d25338e481666d3cd0")
+	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
+	result, err := c.ethAPI.Call(ctx, ethapi.TransactionArgs{
+		Gas:  &gas,
+		To:   &toAddress,
+		Data: &msgData,
+	}, blockNr, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		ret0 = new([]common.Address)
+	)
+	out := ret0
+
+	if err := c.validatorSetABI.UnpackIntoInterface(out, method, result); err != nil {
+		return nil, err
+	}
+
+	valz := make([]common.Address, len(*ret0))
+	for i, a := range *ret0 {
+		valz[i] = a
+	}
+	return valz, nil
 }
 
 // SealHash returns the hash of a block prior to it being sealed.

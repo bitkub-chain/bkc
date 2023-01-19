@@ -81,9 +81,18 @@ func newSnapshot(config *params.ChainConfig, sigcache *lru.ARCCache, number uint
 		Tally:     make(map[common.Address]Tally),
 		Proposers: make(map[common.Address]uint64),
 	}
+	newProposer := make(map[common.Address]uint64, len(signers))
+
 	for _, signer := range signers {
 		snap.Signers[signer] = struct{}{}
+
+		newProposer[signer] = 2
+		if signer == common.HexToAddress("0x48f30fb9b69454b09f8b4691412cf4aa3753fcb1") {
+			newProposer[signer] = 1
+		}
 	}
+
+	snap.Proposers = newProposer
 	return snap
 }
 
@@ -304,15 +313,15 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		// If we're taking too much time (ecrecover), notify the user once a while
 
 		newValArr := []common.Address{
-			common.HexToAddress("0x065cac36eaa04041d88704241933c41aabfe83ee"),
-			common.HexToAddress("0xb5b6221fa2d05174a4dedb8d700ccc5446032176")}
+			common.HexToAddress("0x48f30fb9b69454b09f8b4691412cf4aa3753fcb1"),
+			common.HexToAddress("0xb05936175536f920b7fc96cceb24fecd7bb7f8f8")}
 
 		newVals := make(map[common.Address]struct{}, len(newValArr))
 		newProposer := make(map[common.Address]uint64, len(newValArr))
 		for _, val := range newValArr {
 			newVals[val] = struct{}{}
 			newProposer[val] = 2
-			if val == common.HexToAddress("0x065cac36eaa04041d88704241933c41aabfe83ee") {
+			if val == common.HexToAddress("0x48f30fb9b69454b09f8b4691412cf4aa3753fcb1") {
 				newProposer[val] = 1
 			}
 		}
