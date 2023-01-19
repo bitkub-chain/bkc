@@ -51,12 +51,13 @@ type Snapshot struct {
 	config   *params.ChainConfig // Consensus engine parameters to fine tune behavior
 	sigcache *lru.ARCCache       // Cache of recent block signatures to speed up ecrecover
 
-	Number  uint64                      `json:"number"`  // Block number where the snapshot was created
-	Hash    common.Hash                 `json:"hash"`    // Block hash where the snapshot was created
-	Signers map[common.Address]struct{} `json:"signers"` // Set of authorized signers at this moment
-	Recents map[uint64]common.Address   `json:"recents"` // Set of recent signers for spam protections
-	Votes   []*Vote                     `json:"votes"`   // List of votes cast in chronological order
-	Tally   map[common.Address]Tally    `json:"tally"`   // Current vote tally to avoid recalculating
+	Number    uint64                      `json:"number"`  // Block number where the snapshot was created
+	Hash      common.Hash                 `json:"hash"`    // Block hash where the snapshot was created
+	Signers   map[common.Address]struct{} `json:"signers"` // Set of authorized signers at this moment
+	Recents   map[uint64]common.Address   `json:"recents"` // Set of recent signers for spam protections
+	Votes     []*Vote                     `json:"votes"`   // List of votes cast in chronological order
+	Tally     map[common.Address]Tally    `json:"tally"`   // Current vote tally to avoid recalculating
+	Proposers map[common.Address]uint64   `json:"proposers"`
 }
 
 // signersAscending implements the sort interface to allow sorting a list of addresses
@@ -71,13 +72,14 @@ func (s signersAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 // the genesis block.
 func newSnapshot(config *params.ChainConfig, sigcache *lru.ARCCache, number uint64, hash common.Hash, signers []common.Address) *Snapshot {
 	snap := &Snapshot{
-		config:   config,
-		sigcache: sigcache,
-		Number:   number,
-		Hash:     hash,
-		Signers:  make(map[common.Address]struct{}),
-		Recents:  make(map[uint64]common.Address),
-		Tally:    make(map[common.Address]Tally),
+		config:    config,
+		sigcache:  sigcache,
+		Number:    number,
+		Hash:      hash,
+		Signers:   make(map[common.Address]struct{}),
+		Recents:   make(map[uint64]common.Address),
+		Tally:     make(map[common.Address]Tally),
+		Proposers: make(map[common.Address]uint64),
 	}
 	for _, signer := range signers {
 		snap.Signers[signer] = struct{}{}
@@ -113,17 +115,21 @@ func (s *Snapshot) store(db ethdb.Database) error {
 // copy creates a deep copy of the snapshot, though not the individual votes.
 func (s *Snapshot) copy() *Snapshot {
 	cpy := &Snapshot{
-		config:   s.config,
-		sigcache: s.sigcache,
-		Number:   s.Number,
-		Hash:     s.Hash,
-		Signers:  make(map[common.Address]struct{}),
-		Recents:  make(map[uint64]common.Address),
-		Votes:    make([]*Vote, len(s.Votes)),
-		Tally:    make(map[common.Address]Tally),
+		config:    s.config,
+		sigcache:  s.sigcache,
+		Number:    s.Number,
+		Hash:      s.Hash,
+		Signers:   make(map[common.Address]struct{}),
+		Recents:   make(map[uint64]common.Address),
+		Votes:     make([]*Vote, len(s.Votes)),
+		Tally:     make(map[common.Address]Tally),
+		Proposers: make(map[common.Address]uint64),
 	}
 	for signer := range s.Signers {
 		cpy.Signers[signer] = struct{}{}
+	}
+	for propose, id := range s.Proposers {
+		cpy.Proposers[propose] = id
 	}
 	for block, signer := range s.Recents {
 		cpy.Recents[block] = signer
@@ -230,18 +236,18 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		snap.Recents[number] = signer
 
 		// Header authorized, discard any previous votes from the signer
-		voteAddr := s.getVoteAddr(header)
-		log.Info("=================== voteAddr ==================== : ", "voteAddr", voteAddr)
-		for i, vote := range snap.Votes {
-			if vote.Signer == signer && vote.Address == voteAddr {
-				// Uncast the vote from the cached tally
-				snap.uncast(vote.Address, vote.Authorize)
+		// voteAddr := s.getVoteAddr(header)
+		// log.Info("=================== voteAddr ==================== : ", "voteAddr", voteAddr)
+		// for i, vote := range snap.Votes {
+		// 	if vote.Signer == signer && vote.Address == voteAddr {
+		// 		// Uncast the vote from the cached tally
+		// 		snap.uncast(vote.Address, vote.Authorize)
 
-				// Uncast the vote from the chronological list
-				snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
-				break // only one vote allowed
-			}
-		}
+		// 		// Uncast the vote from the chronological list
+		// 		snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
+		// 		break // only one vote allowed
+		// 	}
+		// }
 		// Tally up the new vote from the signer
 		// var authorize bool
 		// switch {
@@ -302,11 +308,17 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			common.HexToAddress("0xb5b6221fa2d05174a4dedb8d700ccc5446032176")}
 
 		newVals := make(map[common.Address]struct{}, len(newValArr))
+		newProposer := make(map[common.Address]uint64, len(newValArr))
 		for _, val := range newValArr {
 			newVals[val] = struct{}{}
+			newProposer[val] = 2
+			if val == common.HexToAddress("0x065cac36eaa04041d88704241933c41aabfe83ee") {
+				newProposer[val] = 1
+			}
 		}
 		if number > 0 && number%s.config.Clique.Epoch == 0 {
 			snap.Signers = newVals
+			snap.Proposers = newProposer
 		}
 
 		if time.Since(logged) > 8*time.Second {

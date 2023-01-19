@@ -157,9 +157,6 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache) (common.Address, er
 
 	// Recover the public key and the Ethereum address
 	pubkey, err := crypto.Ecrecover(SealHash(header).Bytes(), signature)
-	// log.Info("============ pubkey ============= : ", "pubkey", pubkey[1:])
-	// log.Info("============ pubkey ============= : ", "pubkey", crypto.Keccak256(pubkey[1:]))
-	log.Info("============ pubkey ============= : ", "pubkey", crypto.Keccak256(pubkey[1:])[12:])
 	if err != nil {
 		return common.Address{}, err
 	}
@@ -247,7 +244,6 @@ func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*typ
 // looking those up from the database. This is useful for concurrently verifying
 // a batch of new headers.
 func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
-	log.Info("=================== parents ==================== : ", "parents", parents)
 	if header.Number == nil {
 		return errUnknownBlock
 	}
@@ -493,16 +489,20 @@ func (c *Clique) verifySeal(snap *Snapshot, header *types.Header, parents []*typ
 	// 		}
 	// 	}
 	// }
+
+	// !!! We have modified to use the difficulty to store the index of the next producer so
+	// does not need to check it is inturn or no turn
+
 	// Ensure that the difficulty corresponds to the turn-ness of the signer
-	if !c.fakeDiff {
-		inturn := snap.inturn(header.Number.Uint64(), signer)
-		if inturn && header.Difficulty.Cmp(diffInTurn) != 0 {
-			return errWrongDifficulty
-		}
-		if !inturn && header.Difficulty.Cmp(diffNoTurn) != 0 {
-			return errWrongDifficulty
-		}
-	}
+	// if !c.fakeDiff {
+	// 	inturn := snap.inturn(header.Number.Uint64(), signer)
+	// 	if inturn && header.Difficulty.Cmp(diffInTurn) != 0 {
+	// 		return errWrongDifficulty
+	// 	}
+	// 	if !inturn && header.Difficulty.Cmp(diffNoTurn) != 0 {
+	// 		return errWrongDifficulty
+	// 	}
+	// }
 	return nil
 }
 
@@ -547,7 +547,20 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		c.lock.RUnlock()
 	}
 	// Set the correct difficulty
-	header.Difficulty = calcDifficulty(snap, c.signer)
+	header.Difficulty = big.NewInt(1)
+
+	// this code has to be change to get the max number from the range of the validator set in each epoch!
+	// this code use to random the index number of the next block producer from the range of validator set,
+	// and push into the difficulty of block header
+	min := 1
+	max := 21
+	// set seed
+	rand.Seed(time.Now().UnixNano())
+	// generate random number and print on console
+	index := rand.Intn(max-min) + min
+	if index%2 == 0 {
+		header.Difficulty = big.NewInt(2)
+	}
 
 	// Ensure the extra data has all its components
 	if len(header.Extra) < extraVanity {
@@ -609,6 +622,10 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 
 	// Sealing the genesis block is not supported
 	number := header.Number.Uint64()
+
+	// Getting index of intern producer from the difficulty in the previous block
+	internProducer := chain.GetHeaderByNumber(number - 1).Difficulty
+
 	if number == 0 {
 		return errUnknownBlock
 	}
@@ -651,7 +668,8 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	superValidators := common.HexToAddress("0x065cac36eaa04041d88704241933c41aabfe83ee")
 
 	// Sign all the things!
-	if header.Difficulty.Cmp(diffInTurn) == 0 {
+
+	if internProducer.Cmp(new(big.Int).SetUint64(snap.Proposers[signer])) == 0 {
 		sighash, err := signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, CliqueRLP(header))
 		if err != nil {
 			return err
@@ -700,7 +718,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 }
 
 // CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
-// that a new block should have:
+// that a new block should have:``
 // * DIFF_NOTURN(2) if BLOCK_NUMBER % SIGNER_COUNT != SIGNER_INDEX
 // * DIFF_INTURN(1) if BLOCK_NUMBER % SIGNER_COUNT == SIGNER_INDEX
 func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, time uint64, parent *types.Header) *big.Int {
