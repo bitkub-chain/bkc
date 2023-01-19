@@ -9,27 +9,13 @@ const validatorSetABI = `
 	},
 	{
 		"anonymous": false,
-		"inputs": [
-			{
-				"indexed": false,
-				"internalType": "address",
-				"name": "_validator",
-				"type": "address"
-			}
-		],
+		"inputs": [],
 		"name": "AddValidator",
 		"type": "event"
 	},
 	{
 		"anonymous": false,
-		"inputs": [
-			{
-				"indexed": false,
-				"internalType": "address",
-				"name": "_validator",
-				"type": "address"
-			}
-		],
+		"inputs": [],
 		"name": "RemoveValidator",
 		"type": "event"
 	},
