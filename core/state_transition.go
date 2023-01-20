@@ -179,6 +179,7 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 // indicates a core error meaning that the message would always fail for that particular
 // state and would never be accepted within a block.
 func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool) (*ExecutionResult, error) {
+	log.Info("----------- msg ---------- : ", "state_transition", msg)
 	return NewStateTransition(evm, msg, gp).TransitionDb()
 }
 
@@ -259,10 +260,12 @@ func (st *StateTransition) preCheck() error {
 	}
 	// add check pos transition here!!!!
 	// check gasprice from
-	recommentGas := st.state.GetState(common.HexToAddress("0x48D6C7f201C4466C877b0Ff1ad05c243D57E0769"), common.BigToHash(big.NewInt(0))).Big()
+	recommentGas := st.state.GetState(common.HexToAddress("0x92990a1E95238C8383996a2F1f84eED24f2C8A17"), common.BigToHash(big.NewInt(0))).Big()
 	log.Info("============= recommentGas =============", "state_transition", recommentGas)
 	if recommentGas.Cmp(big.NewInt(0)) > 0 {
-		if st.msg.GasPrice().Cmp(recommentGas) < 0 {
+		log.Info("============= msg GasPrice =============", "state_transition", st.msg.GasPrice())
+		log.Info("============= msg Nonce =============", "state_transition", st.msg.Nonce())
+		if st.msg.GasPrice().Cmp(big.NewInt(0)) != 0 && st.msg.GasPrice().Cmp(recommentGas) < 0 {
 			return fmt.Errorf("Error")
 		}
 	}

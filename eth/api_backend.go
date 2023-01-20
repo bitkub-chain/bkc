@@ -296,7 +296,7 @@ func (b *EthAPIBackend) SuggestGasTipCap(ctx context.Context) (*big.Int, error) 
 	}
 
 	stateDb, _ := b.eth.BlockChain().StateAt(header.Root)
-	result := stateDb.GetState(common.HexToAddress("0x48D6C7f201C4466C877b0Ff1ad05c243D57E0769"), common.BigToHash(big.NewInt(0)))
+	result := stateDb.GetState(common.HexToAddress("0x92990a1E95238C8383996a2F1f84eED24f2C8A17"), common.BigToHash(big.NewInt(0)))
 
 	if result.Big().Cmp(big.NewInt(0)) > 0 {
 		return result.Big(), nil

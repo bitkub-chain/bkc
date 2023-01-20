@@ -19,6 +19,7 @@ package clique
 import (
 	"bytes"
 	"encoding/json"
+	"math/big"
 	"sort"
 	"time"
 
@@ -86,9 +87,11 @@ func newSnapshot(config *params.ChainConfig, sigcache *lru.ARCCache, number uint
 	for _, signer := range signers {
 		snap.Signers[signer] = struct{}{}
 
-		newProposer[signer] = 2
-		if signer == common.HexToAddress("0x48f30fb9b69454b09f8b4691412cf4aa3753fcb1") {
-			newProposer[signer] = 1
+		if config.IsPoS(new(big.Int).SetUint64(number)) {
+			newProposer[signer] = 2
+			if signer == common.HexToAddress("0x48f30fb9b69454b09f8b4691412cf4aa3753fcb1") {
+				newProposer[signer] = 1
+			}
 		}
 	}
 
@@ -237,99 +240,111 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		if _, ok := snap.Signers[signer]; !ok {
 			return nil, errUnauthorizedSigner
 		}
-		// for _, recent := range snap.Recents {
-		// 	if recent == signer {
-		// 		return nil, errRecentlySigned
-		// 	}
-		// }
-		snap.Recents[number] = signer
 
-		// Header authorized, discard any previous votes from the signer
-		// voteAddr := s.getVoteAddr(header)
-		// log.Info("=================== voteAddr ==================== : ", "voteAddr", voteAddr)
-		// for i, vote := range snap.Votes {
-		// 	if vote.Signer == signer && vote.Address == voteAddr {
-		// 		// Uncast the vote from the cached tally
-		// 		snap.uncast(vote.Address, vote.Authorize)
+		if !s.config.IsPoS(header.Number) {
+			for _, recent := range snap.Recents {
+				if recent == signer {
+					return nil, errRecentlySigned
+				}
+			}
+			snap.Recents[number] = signer
 
-		// 		// Uncast the vote from the chronological list
-		// 		snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
-		// 		break // only one vote allowed
-		// 	}
-		// }
-		// Tally up the new vote from the signer
-		// var authorize bool
-		// switch {
-		// case bytes.Equal(header.Nonce[:], nonceAuthVote):
-		// 	authorize = true
-		// case bytes.Equal(header.Nonce[:], nonceDropVote):
-		// 	authorize = false
-		// default:
-		// 	return nil, errInvalidVote
-		// }
-		// if snap.cast(voteAddr, authorize) {
-		// 	snap.Votes = append(snap.Votes, &Vote{
-		// 		Signer:    signer,
-		// 		Block:     number,
-		// 		Address:   voteAddr,
-		// 		Authorize: authorize,
-		// 	})
-		// }
-		// If the vote passed, update the list of signers
-		// if tally := snap.Tally[voteAddr]; tally.Votes > len(snap.Signers)/2 {
-		// if tally := snap.Tally[voteAddr]; tally.Votes >= 1 {
-		// if tally.Authorize {
-		// 	snap.Signers[voteAddr] = struct{}{}
-		// } else {
-		// 	delete(snap.Signers, voteAddr)
+			// Header authorized, discard any previous votes from the signer
+			voteAddr := s.getVoteAddr(header)
+			log.Info("=================== voteAddr ==================== : ", "voteAddr", voteAddr)
+			for i, vote := range snap.Votes {
+				if vote.Signer == signer && vote.Address == voteAddr {
+					// Uncast the vote from the cached tally
+					snap.uncast(vote.Address, vote.Authorize)
 
-		// 	// Signer list shrunk, delete any leftover recent caches
-		// 	if limit := uint64(len(snap.Signers)/2 + 1); number >= limit {
-		// 		delete(snap.Recents, number-limit)
-		// 	}
-		// 	// Discard any previous votes the deauthorized signer cast
-		// 	for i := 0; i < len(snap.Votes); i++ {
-		// 		if snap.Votes[i].Signer == voteAddr {
-		// 			// Uncast the vote from the cached tally
-		// 			snap.uncast(snap.Votes[i].Address, snap.Votes[i].Authorize)
+					// Uncast the vote from the chronological list
+					snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
+					break // only one vote allowed
+				}
+			}
+			// Tally up the new vote from the signer
+			var authorize bool
+			switch {
+			case bytes.Equal(header.Nonce[:], nonceAuthVote):
+				authorize = true
+			case bytes.Equal(header.Nonce[:], nonceDropVote):
+				authorize = false
+			default:
+				return nil, errInvalidVote
+			}
+			if snap.cast(voteAddr, authorize) {
+				snap.Votes = append(snap.Votes, &Vote{
+					Signer:    signer,
+					Block:     number,
+					Address:   voteAddr,
+					Authorize: authorize,
+				})
+			}
+			// If the vote passed, update the list of signers
+			if tally := snap.Tally[voteAddr]; tally.Votes > len(snap.Signers)/2 {
+				if tally.Authorize {
+					snap.Signers[voteAddr] = struct{}{}
+				} else {
+					delete(snap.Signers, voteAddr)
 
-		// 			// Uncast the vote from the chronological list
-		// 			snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
+					// Signer list shrunk, delete any leftover recent caches
+					if limit := uint64(len(snap.Signers)/2 + 1); number >= limit {
+						delete(snap.Recents, number-limit)
+					}
+					// Discard any previous votes the deauthorized signer cast
+					for i := 0; i < len(snap.Votes); i++ {
+						if snap.Votes[i].Signer == voteAddr {
+							// Uncast the vote from the cached tally
+							snap.uncast(snap.Votes[i].Address, snap.Votes[i].Authorize)
 
-		// 			i--
-		// 		}
-		// 	}
-		// }
-		// // Discard any previous votes around the just changed account
-		// for i := 0; i < len(snap.Votes); i++ {
-		// 	if snap.Votes[i].Address == voteAddr {
-		// 		snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
-		// 		i--
-		// 	}
-		// }
-		// delete(snap.Tally, voteAddr)
-		// }
-		// snap.Signers[voteAddr] = struct{}{}
-		// If we're taking too much time (ecrecover), notify the user once a while
+							// Uncast the vote from the chronological list
+							snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
 
-		newValArr := []common.Address{
-			common.HexToAddress("0x48f30fb9b69454b09f8b4691412cf4aa3753fcb1"),
-			common.HexToAddress("0xb05936175536f920b7fc96cceb24fecd7bb7f8f8")}
+							i--
+						}
+					}
+				}
+				// Discard any previous votes around the just changed account
+				for i := 0; i < len(snap.Votes); i++ {
+					if snap.Votes[i].Address == voteAddr {
+						snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
+						i--
+					}
+				}
+				delete(snap.Tally, voteAddr)
+			}
+		} else {
+			// newValidators, err := c.getCurrentValidators(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1))
+			// if err != nil {
+			// 	return err
+			// }
+			// // sort validator by address
+			// // sort.Sort(validatorsAscending(newValidators))
+			// log.Info("====================newValidators====================", "newValidators", newValidators)
+			newValArr := []common.Address{
+				common.HexToAddress("0x48f30fb9b69454b09f8b4691412cf4aa3753fcb1"),
+				common.HexToAddress("0xb05936175536f920b7fc96cceb24fecd7bb7f8f8")}
 
-		newVals := make(map[common.Address]struct{}, len(newValArr))
-		newProposer := make(map[common.Address]uint64, len(newValArr))
-		for _, val := range newValArr {
-			newVals[val] = struct{}{}
-			newProposer[val] = 2
-			if val == common.HexToAddress("0x48f30fb9b69454b09f8b4691412cf4aa3753fcb1") {
-				newProposer[val] = 1
+			newVals := make(map[common.Address]struct{}, len(newValArr))
+			newProposer := make(map[common.Address]uint64, len(newValArr))
+			for _, val := range newValArr {
+				newVals[val] = struct{}{}
+				newProposer[val] = 2
+				if val == common.HexToAddress("0x48f30fb9b69454b09f8b4691412cf4aa3753fcb1") {
+					newProposer[val] = 1
+				}
+			}
+			if number > 0 && number%s.config.Clique.Epoch == 0 {
+				snap.Signers = newVals
+				snap.Proposers = newProposer
+			}
+
+			if time.Since(logged) > 8*time.Second {
+				log.Info("Reconstructing voting history", "processed", i, "total", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
+				logged = time.Now()
 			}
 		}
-		if number > 0 && number%s.config.Clique.Epoch == 0 {
-			snap.Signers = newVals
-			snap.Proposers = newProposer
-		}
-
+		// If we're taking too much time (ecrecover), notify the user once a while
 		if time.Since(logged) > 8*time.Second {
 			log.Info("Reconstructing voting history", "processed", i, "total", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
 			logged = time.Now()
