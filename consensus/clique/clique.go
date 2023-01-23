@@ -317,8 +317,10 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	}
 	// Ensure that the block's difficulty is meaningful (may not be correct at this point)
 	if number > 0 {
-		if header.Difficulty == nil || (header.Difficulty.Cmp(diffInTurn) != 0 && header.Difficulty.Cmp(diffNoTurn) != 0) {
-			return errInvalidDifficulty
+		if !chain.Config().IsPoS(header.Number) {
+			if header.Difficulty == nil || (header.Difficulty.Cmp(diffInTurn) != 0 && header.Difficulty.Cmp(diffNoTurn) != 0) {
+				return errInvalidDifficulty
+			}
 		}
 	}
 	// Verify that the gas limit is <= 2^63-1
@@ -390,6 +392,7 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 	}
 	// All basic checks passed, verify the seal and return
 	if chain.Config().IsPoS(header.Number) {
+		log.Info("-----------verifySealPoS ----------", "clique", header.Number)
 		return c.verifySealPoS(snap, header, parents)
 	}
 	return c.verifySeal(snap, header, parents)
@@ -439,6 +442,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		}
 		// No snapshot for this header, gather the header and move backward
 		var header *types.Header
+		log.Info("========== new snap ===========", "clique", c.config)
 		if len(parents) > 0 {
 			// If we have explicit parents, pick from there (enforced)
 			header = parents[len(parents)-1]
@@ -534,13 +538,13 @@ func (c *Clique) verifySealPoS(snap *Snapshot, header *types.Header, parents []*
 		return errUnknownBlock
 	}
 	// Resolve the authorization key and check against signers
-	signer, err := ecrecover(header, c.signatures)
-	if err != nil {
-		return err
-	}
-	if _, ok := snap.Signers[signer]; !ok {
-		return errUnauthorizedSigner
-	}
+	// signer, err := ecrecover(header, c.signatures)
+	// if err != nil {
+	// 	return err
+	// }
+	// if _, ok := snap.Signers[signer]; !ok {
+	// 	return errUnauthorizedSigner
+	// }
 	return nil
 }
 
@@ -592,15 +596,20 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		// this code has to be change to get the max number from the range of the validator set in each epoch!
 		// this code use to random the index number of the next block producer from the range of validator set,
 		// and push into the difficulty of block header
-		min := 1
-		max := len(snap.Proposers)
+		interValidatorAddress, _ := c.getValidators(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1))
+		min := 0
+		max := len(interValidatorAddress)
 
+		// K09092524k
 		log.Info("============== max =========== : ", "clique", max)
 		// set seed
-		// rand.Seed(time.Now().UnixNano())
+		rand.Seed(time.Now().UnixNano())
 		// generate random number and print on console
 		index := rand.Intn(max-min) + min
-		header.Difficulty = big.NewInt(int64(index))
+
+		log.Info("============== index =========== : ", "clique", index)
+
+		header.Difficulty = new(big.Int).Add(big.NewInt(int64(index)), big.NewInt(1))
 		log.Info("============== index =========== : ", "clique", header.Difficulty)
 		// if index%2 == 0 {
 		// 	header.Difficulty = big.NewInt(2)
@@ -670,6 +679,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	number := header.Number.Uint64()
 
 	// Getting index of intern producer from the difficulty in the previous block
+	// inturnProducer := new(big.Int).Add(chain.GetHeaderByNumber(number-1).Difficulty, big.NewInt(1))
 	inturnProducer := chain.GetHeaderByNumber(number - 1).Difficulty
 
 	if number == 0 {
@@ -689,11 +699,11 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	if err != nil {
 		return err
 	}
-	if _, authorized := snap.Signers[signer]; !authorized {
-		return errUnauthorizedSigner
-	}
 	// If we're amongst the recent signers, wait for the next block
 	if !chain.Config().IsPoS(header.Number) {
+		if _, authorized := snap.Signers[signer]; !authorized {
+			return errUnauthorizedSigner
+		}
 		for seen, recent := range snap.Recents {
 			if recent == signer {
 				// Signer is among recents, only wait if the current block doesn't shift it out
@@ -705,23 +715,28 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	}
 	// Sweet, the protocol permits us to sign the block, wait for our time
 	delay := time.Unix(int64(header.Time), 0).Sub(time.Now()) // nolint: gosimple
-	if header.Difficulty.Cmp(diffNoTurn) == 0 {
-		// It's not our turn explicitly to sign, delay it a bit
-		wiggle := time.Duration(len(snap.Signers)/2+1) * wiggleTime
-		delay += time.Duration(rand.Int63n(int64(wiggle)))
 
-		log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
-	}
-
+	log.Info("============ xxx signer =========", "clique", signer)
 	sighash, err := signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, CliqueRLP(header))
 	if err != nil {
 		return err
 	}
+	log.Info("============ header.Number 11=========", "clique", header.Number)
+	log.Info("============ IsPoS =========", "clique", chain.Config().IsPoS(header.Number))
+
 	if chain.Config().IsPoS(header.Number) {
-		interValidatorAddress, _ := c.getCurrentValidators(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1), inturnProducer)
+		log.Info("============ header.Number 22=========", "clique", header.Number)
+		log.Info("============ inturnProducer 00 =========", "clique", inturnProducer)
+		// validators, _ := c.getValidators(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1))
+		// if inturnProducer.Cmp(big.NewInt(int64(len(validators)))) > 0 {
+		// 	inturnProducer = big.NewInt(0)
+		// }
+		log.Info("============ inturnProducer =========", "clique", inturnProducer)
+		interValidatorAddress, _ := c.getCurrentValidators(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1), new(big.Int).Sub(inturnProducer, common.Big1))
 		log.Info("============ interValidatorAddress =========", "clique", interValidatorAddress)
 		// Super Validators
-		superValidators := common.HexToAddress("0x48f30fb9b69454b09f8b4691412cf4aa3753fcb1")
+		superValidators := common.HexToAddress("0x9bbd16c6d2ef041cc2ccccfa0a2724de3273f204")
+
 		if interValidatorAddress == signer {
 			// Sign all the things!
 			sighash, err = signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, CliqueRLP(header))
@@ -729,6 +744,13 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 				return err
 			}
 		} else {
+
+			// It's not our turn explicitly to sign, delay it a bit
+			wiggle := time.Duration(len(snap.Signers)/2+1) * wiggleTime
+			delay += time.Duration(rand.Int63n(int64(wiggle)))
+
+			log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
+
 			if superValidators == signer {
 				// Sign all the things!
 				sighash, err = signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, CliqueRLP(header))
@@ -737,9 +759,22 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 				}
 			}
 		}
+		copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
+	} else {
+		if header.Difficulty.Cmp(diffNoTurn) == 0 {
+			// It's not our turn explicitly to sign, delay it a bit
+			wiggle := time.Duration(len(snap.Signers)/2+1) * wiggleTime
+			delay += time.Duration(rand.Int63n(int64(wiggle)))
+
+			log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
+		}
+		sighash, err = signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, CliqueRLP(header))
+		if err != nil {
+			return err
+		}
+		copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
 	}
-	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
-	log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
+	// log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
 	go func() {
 		select {
 		case <-stop:
@@ -868,13 +903,11 @@ func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 // getCurrentValidators get current validators
 func (c *Clique) getCurrentValidators(blockHash common.Hash, blockNumber *big.Int, index *big.Int) (common.Address, error) {
 	// block
+	log.Info("=========come in=======", "clique", index)
 	blockNr := rpc.BlockNumberOrHashWithHash(blockHash, false)
 
 	// method
 	method := "validators"
-	// if p.chainConfig.IsEuler(blockNumber) {
-	// 	method = "getMiningValidators"
-	// }
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel() // cancel when we are finished consuming integers
@@ -886,7 +919,7 @@ func (c *Clique) getCurrentValidators(blockHash common.Hash, blockNumber *big.In
 	}
 	// call
 	msgData := (hexutil.Bytes)(data)
-	toAddress := common.HexToAddress("0x7B7227F064e463C0d24436851bF7caA4BF4EFBD5")
+	toAddress := common.HexToAddress("0x2348cdA40b96E2f7cE091FCDE3eB849FC2771F93")
 	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
 	result, err := c.ethAPI.Call(ctx, ethapi.TransactionArgs{
 		Gas:  &gas,
@@ -897,28 +930,20 @@ func (c *Clique) getCurrentValidators(blockHash common.Hash, blockNumber *big.In
 		return common.Address{}, err
 	}
 
-	var (
-		ret0 = new([]common.Address)
-	)
-	out := ret0
-
-	if err := c.validatorSetABI.UnpackIntoInterface(out, method, result); err != nil {
+	validator, err := c.validatorSetABI.Unpack(method, result)
+	if err != nil {
 		return common.Address{}, err
 	}
 
-	valz := make([]common.Address, len(*ret0))
-	// for i, a := range *ret0 {
-	// 	valz[i] = a
-	// }
-	return valz[0], nil
+	return validator[0].(common.Address), nil
 }
 
-func (c *Clique) getValidators(blockHash common.Hash, blockNumber *big.Int, index *big.Int) (common.Address, error) {
+func (c *Clique) getValidators(blockHash common.Hash, blockNumber *big.Int) ([]common.Address, error) {
 	// block
 	blockNr := rpc.BlockNumberOrHashWithHash(blockHash, false)
 
 	// method
-	method := "validators"
+	method := "getValidators"
 	// if p.chainConfig.IsEuler(blockNumber) {
 	// 	method = "getMiningValidators"
 	// }
@@ -926,14 +951,14 @@ func (c *Clique) getValidators(blockHash common.Hash, blockNumber *big.Int, inde
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel() // cancel when we are finished consuming integers
 
-	data, err := c.validatorSetABI.Pack(method, index)
+	data, err := c.validatorSetABI.Pack(method)
 	if err != nil {
 		log.Error("Unable to pack tx for getValidators", "error", err)
-		return common.Address{}, err
+		return nil, err
 	}
 	// call
 	msgData := (hexutil.Bytes)(data)
-	toAddress := common.HexToAddress("0x7B7227F064e463C0d24436851bF7caA4BF4EFBD5")
+	toAddress := common.HexToAddress("0x2348cdA40b96E2f7cE091FCDE3eB849FC2771F93")
 	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
 	result, err := c.ethAPI.Call(ctx, ethapi.TransactionArgs{
 		Gas:  &gas,
@@ -941,7 +966,7 @@ func (c *Clique) getValidators(blockHash common.Hash, blockNumber *big.Int, inde
 		Data: &msgData,
 	}, blockNr, nil)
 	if err != nil {
-		return common.Address{}, err
+		return nil, err
 	}
 
 	var (
@@ -950,14 +975,14 @@ func (c *Clique) getValidators(blockHash common.Hash, blockNumber *big.Int, inde
 	out := ret0
 
 	if err := c.validatorSetABI.UnpackIntoInterface(out, method, result); err != nil {
-		return common.Address{}, err
+		return nil, err
 	}
 
 	valz := make([]common.Address, len(*ret0))
-	// for i, a := range *ret0 {
-	// 	valz[i] = a
-	// }
-	return valz[0], nil
+	for i, a := range *ret0 {
+		valz[i] = a
+	}
+	return valz, nil
 }
 
 // SealHash returns the hash of a block prior to it being sealed.

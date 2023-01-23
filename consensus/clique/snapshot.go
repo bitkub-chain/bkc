@@ -19,7 +19,6 @@ package clique
 import (
 	"bytes"
 	"encoding/json"
-	"math/big"
 	"sort"
 	"time"
 
@@ -87,12 +86,12 @@ func newSnapshot(config *params.ChainConfig, sigcache *lru.ARCCache, number uint
 	for _, signer := range signers {
 		snap.Signers[signer] = struct{}{}
 
-		if config.IsPoS(new(big.Int).SetUint64(number)) {
-			newProposer[signer] = 2
-			if signer == common.HexToAddress("0x48f30fb9b69454b09f8b4691412cf4aa3753fcb1") {
-				newProposer[signer] = 1
-			}
-		}
+		// if config.IsPoS(new(big.Int).SetUint64(number)) {
+		// 	newProposer[signer] = 2
+		// 	if signer == common.HexToAddress("0x48f30fb9b69454b09f8b4691412cf4aa3753fcb1") {
+		// 		newProposer[signer] = 1
+		// 	}
+		// }
 	}
 
 	snap.Proposers = newProposer
@@ -237,11 +236,11 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		if err != nil {
 			return nil, err
 		}
-		if _, ok := snap.Signers[signer]; !ok {
-			return nil, errUnauthorizedSigner
-		}
 
 		if !s.config.IsPoS(header.Number) {
+			if _, ok := snap.Signers[signer]; !ok {
+				return nil, errUnauthorizedSigner
+			}
 			for _, recent := range snap.Recents {
 				if recent == signer {
 					return nil, errRecentlySigned
@@ -321,28 +320,30 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			// // sort validator by address
 			// // sort.Sort(validatorsAscending(newValidators))
 			// log.Info("====================newValidators====================", "newValidators", newValidators)
-			newValArr := []common.Address{
-				common.HexToAddress("0x48f30fb9b69454b09f8b4691412cf4aa3753fcb1"),
-				common.HexToAddress("0xb05936175536f920b7fc96cceb24fecd7bb7f8f8")}
 
-			newVals := make(map[common.Address]struct{}, len(newValArr))
-			newProposer := make(map[common.Address]uint64, len(newValArr))
-			for _, val := range newValArr {
-				newVals[val] = struct{}{}
-				newProposer[val] = 2
-				if val == common.HexToAddress("0x48f30fb9b69454b09f8b4691412cf4aa3753fcb1") {
-					newProposer[val] = 1
-				}
-			}
-			if number > 0 && number%s.config.Clique.Epoch == 0 {
-				snap.Signers = newVals
-				snap.Proposers = newProposer
-			}
+			//************************
+			// newValArr := []common.Address{
+			// 	common.HexToAddress("0x48f30fb9b69454b09f8b4691412cf4aa3753fcb1"),
+			// 	common.HexToAddress("0xb05936175536f920b7fc96cceb24fecd7bb7f8f8")}
 
-			if time.Since(logged) > 8*time.Second {
-				log.Info("Reconstructing voting history", "processed", i, "total", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
-				logged = time.Now()
-			}
+			// newVals := make(map[common.Address]struct{}, len(newValArr))
+			// newProposer := make(map[common.Address]uint64, len(newValArr))
+			// for _, val := range newValArr {
+			// 	newVals[val] = struct{}{}
+			// 	newProposer[val] = 2
+			// 	if val == common.HexToAddress("0x48f30fb9b69454b09f8b4691412cf4aa3753fcb1") {
+			// 		newProposer[val] = 1
+			// 	}
+			// }
+			// if number > 0 && number%s.config.Clique.Epoch == 0 {
+			// 	snap.Signers = newVals
+			// 	// snap.Proposers = newProposer
+			// }
+
+			// if time.Since(logged) > 8*time.Second {
+			// 	log.Info("Reconstructing voting history", "processed", i, "total", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
+			// 	logged = time.Now()
+			// }
 		}
 		// If we're taking too much time (ecrecover), notify the user once a while
 		if time.Since(logged) > 8*time.Second {
