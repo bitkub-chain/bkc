@@ -23,8 +23,8 @@ contract BKCValidatorSet {
     /**********
      * Events *
      **********/
-    event AddValidator(address _validator);
-    event RemoveValidator(address _validator);
+    event AddValidator();
+    event RemoveValidator();
 
     /***************
      * Constructor *
@@ -32,12 +32,14 @@ contract BKCValidatorSet {
 
     constructor() {
         owner = msg.sender;
-        init();
     }
 
     function init() public {
         require(msg.sender == owner, "Only owner can initialize the contract");
-        validators.push(0x8A9a4147A0c3c4ff45c2DC14a3aC94D1c899E0Cf);
+        // first validator set
+        validators.push(0x065Cac36eaa04041D88704241933c41aabFe83eE);
+        validators.push(0xb5B6221fA2d05174a4deDB8d700Ccc5446032176);
+        validators.push(0x96C9F2F893AdeF66669B4bB4A7dfA5006c037CD3);
     }
     /**
      * Allows the owner to add validator
@@ -47,24 +49,27 @@ contract BKCValidatorSet {
     function addValidator(address _validator) external  {
         require(msg.sender == owner, "Only owner can add validators");
         validators.push(_validator);
-        emit AddValidator(_validator);
+        emit AddValidator();
 
     }
 
     /**
-     * Allows the owner to remove validator
+     * Allows the owner to remove validator by index
      * @param _index validator index
      */
     function removeValidatorByIndex(uint256 _index) external  {
         require(msg.sender == owner, "Only owner can remove validators");
         require(_index < validators.length, "Index out of bounds");
-        delete validators[_index];
-        emit RemoveValidator(validators[_index]);
+        require(validators.length > 1, "Last validator can't be remove");
+        validators[_index] = validators[validators.length - 1];
+        validators.pop(); 
+        emit RemoveValidator();
     }
 
+    /**
+     * Get All Validators Address 
+     */
     function getValidators() public view returns (address[] memory) {
         return validators;
     }
 }
-
-

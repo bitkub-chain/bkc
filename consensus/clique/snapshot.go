@@ -250,7 +250,6 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 
 			// Header authorized, discard any previous votes from the signer
 			voteAddr := s.getVoteAddr(header)
-			log.Info("=================== voteAddr ==================== : ", "voteAddr", voteAddr)
 			for i, vote := range snap.Votes {
 				if vote.Signer == signer && vote.Address == voteAddr {
 					// Uncast the vote from the cached tally
@@ -313,44 +312,13 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 				delete(snap.Tally, voteAddr)
 			}
 		} else {
-			// newValidators, err := c.getCurrentValidators(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1))
-			// if err != nil {
-			// 	return err
-			// }
-			// // sort validator by address
-			// // sort.Sort(validatorsAscending(newValidators))
-			// log.Info("====================newValidators====================", "newValidators", newValidators)
-
-			//************************
-			// newValArr := []common.Address{
-			// 	common.HexToAddress("0x48f30fb9b69454b09f8b4691412cf4aa3753fcb1"),
-			// 	common.HexToAddress("0xb05936175536f920b7fc96cceb24fecd7bb7f8f8")}
-
-			// newVals := make(map[common.Address]struct{}, len(newValArr))
-			// newProposer := make(map[common.Address]uint64, len(newValArr))
-			// for _, val := range newValArr {
-			// 	newVals[val] = struct{}{}
-			// 	newProposer[val] = 2
-			// 	if val == common.HexToAddress("0x48f30fb9b69454b09f8b4691412cf4aa3753fcb1") {
-			// 		newProposer[val] = 1
-			// 	}
-			// }
-			// if number > 0 && number%s.config.Clique.Epoch == 0 {
-			// 	snap.Signers = newVals
-			// 	// snap.Proposers = newProposer
-			// }
-
-			// if time.Since(logged) > 8*time.Second {
-			// 	log.Info("Reconstructing voting history", "processed", i, "total", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
-			// 	logged = time.Now()
-			// }
-		}
-		// If we're taking too much time (ecrecover), notify the user once a while
-		if time.Since(logged) > 8*time.Second {
-			log.Info("Reconstructing voting history", "processed", i, "total", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
-			logged = time.Now()
+			if time.Since(logged) > 8*time.Second {
+				log.Info("Reconstructing voting history", "processed", i, "total", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
+				logged = time.Now()
+			}
 		}
 	}
+	// If we're taking too much time (ecrecover), notify the user once a while
 	if time.Since(start) > 8*time.Second {
 		log.Info("Reconstructed voting history", "processed", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
 	}

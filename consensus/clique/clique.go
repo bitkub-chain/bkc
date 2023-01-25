@@ -392,7 +392,6 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 	}
 	// All basic checks passed, verify the seal and return
 	if chain.Config().IsPoS(header.Number) {
-		log.Info("-----------verifySealPoS ----------", "clique", header.Number)
 		return c.verifySealPoS(snap, header, parents)
 	}
 	return c.verifySeal(snap, header, parents)
@@ -442,7 +441,6 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		}
 		// No snapshot for this header, gather the header and move backward
 		var header *types.Header
-		log.Info("========== new snap ===========", "clique", c.config)
 		if len(parents) > 0 {
 			// If we have explicit parents, pick from there (enforced)
 			header = parents[len(parents)-1]
@@ -600,20 +598,11 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		min := 0
 		max := len(interValidatorAddress)
 
-		// K09092524k
-		log.Info("============== max =========== : ", "clique", max)
 		// set seed
 		rand.Seed(time.Now().UnixNano())
 		// generate random number and print on console
 		index := rand.Intn(max-min) + min
-
-		log.Info("============== index =========== : ", "clique", index)
-
 		header.Difficulty = new(big.Int).Add(big.NewInt(int64(index)), big.NewInt(1))
-		log.Info("============== index =========== : ", "clique", header.Difficulty)
-		// if index%2 == 0 {
-		// 	header.Difficulty = big.NewInt(2)
-		// }
 	}
 
 	// Ensure the extra data has all its components
@@ -638,7 +627,6 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	if header.Time < uint64(time.Now().Unix()) {
 		header.Time = uint64(time.Now().Unix())
 	}
-	log.Info("------------- header -------- : ", "clique", header)
 	return nil
 }
 
@@ -716,24 +704,13 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	// Sweet, the protocol permits us to sign the block, wait for our time
 	delay := time.Unix(int64(header.Time), 0).Sub(time.Now()) // nolint: gosimple
 
-	log.Info("============ xxx signer =========", "clique", signer)
 	sighash, err := signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, CliqueRLP(header))
 	if err != nil {
 		return err
 	}
-	log.Info("============ header.Number 11=========", "clique", header.Number)
-	log.Info("============ IsPoS =========", "clique", chain.Config().IsPoS(header.Number))
 
 	if chain.Config().IsPoS(header.Number) {
-		log.Info("============ header.Number 22=========", "clique", header.Number)
-		log.Info("============ inturnProducer 00 =========", "clique", inturnProducer)
-		// validators, _ := c.getValidators(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1))
-		// if inturnProducer.Cmp(big.NewInt(int64(len(validators)))) > 0 {
-		// 	inturnProducer = big.NewInt(0)
-		// }
-		log.Info("============ inturnProducer =========", "clique", inturnProducer)
 		interValidatorAddress, _ := c.getCurrentValidators(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1), new(big.Int).Sub(inturnProducer, common.Big1))
-		log.Info("============ interValidatorAddress =========", "clique", interValidatorAddress)
 		// Super Validators
 		superValidators := common.HexToAddress("0x9bbd16c6d2ef041cc2ccccfa0a2724de3273f204")
 
@@ -788,73 +765,6 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 			log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
 		}
 	}()
-
-	// sighash, err := signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, CliqueRLP(header))
-	// if err != nil {
-	// 	return err
-	// }
-	// copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
-	// // Wait until sealing is terminated or delay timeout.
-	// log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
-	// go func() {
-	// 	select {
-	// 	case <-stop:
-	// 		return
-	// 	case <-time.After(delay):
-	// 	}
-
-	// 	select {
-	// 	case results <- block.WithSeal(header):
-	// 	default:
-	// 		log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
-	// 	}
-	// }()
-
-	// if internProducer.Cmp(new(big.Int).SetUint64(snap.Proposers[signer])) == 0 {
-	// 	sighash, err := signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, CliqueRLP(header))
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
-	// 	// Wait until sealing is terminated or delay timeout.
-	// 	log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
-	// 	go func() {
-	// 		select {
-	// 		case <-stop:
-	// 			return
-	// 		case <-time.After(delay):
-	// 		}
-
-	// 		select {
-	// 		case results <- block.WithSeal(header):
-	// 		default:
-	// 			log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
-	// 		}
-	// 	}()
-	// } else {
-	// 	if superValidators == signer {
-	// 		sighash, err := signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, CliqueRLP(header))
-	// 		if err != nil {
-	// 			return err
-	// 		}
-	// 		copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
-	// 		// Wait until sealing is terminated or delay timeout.
-	// 		log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
-	// 		go func() {
-	// 			select {
-	// 			case <-stop:
-	// 				return
-	// 			case <-time.After(delay):
-	// 			}
-
-	// 			select {
-	// 			case results <- block.WithSeal(header):
-	// 			default:
-	// 				log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
-	// 			}
-	// 		}()
-	// 	}
-	// }
 	return nil
 }
 
@@ -903,7 +813,6 @@ func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 // getCurrentValidators get current validators
 func (c *Clique) getCurrentValidators(blockHash common.Hash, blockNumber *big.Int, index *big.Int) (common.Address, error) {
 	// block
-	log.Info("=========come in=======", "clique", index)
 	blockNr := rpc.BlockNumberOrHashWithHash(blockHash, false)
 
 	// method
@@ -919,7 +828,7 @@ func (c *Clique) getCurrentValidators(blockHash common.Hash, blockNumber *big.In
 	}
 	// call
 	msgData := (hexutil.Bytes)(data)
-	toAddress := common.HexToAddress("0x2348cdA40b96E2f7cE091FCDE3eB849FC2771F93")
+	toAddress := c.config.Clique.ValidatorContract
 	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
 	result, err := c.ethAPI.Call(ctx, ethapi.TransactionArgs{
 		Gas:  &gas,
@@ -944,9 +853,6 @@ func (c *Clique) getValidators(blockHash common.Hash, blockNumber *big.Int) ([]c
 
 	// method
 	method := "getValidators"
-	// if p.chainConfig.IsEuler(blockNumber) {
-	// 	method = "getMiningValidators"
-	// }
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel() // cancel when we are finished consuming integers
@@ -958,7 +864,7 @@ func (c *Clique) getValidators(blockHash common.Hash, blockNumber *big.Int) ([]c
 	}
 	// call
 	msgData := (hexutil.Bytes)(data)
-	toAddress := common.HexToAddress("0x2348cdA40b96E2f7cE091FCDE3eB849FC2771F93")
+	toAddress := c.config.Clique.ValidatorContract
 	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
 	result, err := c.ethAPI.Call(ctx, ethapi.TransactionArgs{
 		Gas:  &gas,
