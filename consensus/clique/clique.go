@@ -181,7 +181,8 @@ type Clique struct {
 	recents    *lru.ARCCache // Snapshots for recent block to speed up reorgs
 	signatures *lru.ARCCache // Signatures of recent blocks to speed up mining
 
-	proposals map[common.Address]bool // Current list of proposals we are pushing
+	proposals         map[common.Address]bool // Current list of proposals we are pushing
+	validatorContract common.Address          // Ethereum address of the validator set contract
 
 	signer common.Address // Ethereum address of the signing key
 	signFn SignerFn       // Signer function to authorize hashes with
@@ -382,6 +383,7 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 	// If the block is a checkpoint block, verify the signer list
 	if number%c.config.Clique.Epoch == 0 {
 		signers := make([]byte, len(snap.Signers)*common.AddressLength)
+		log.Info("======================= Extra =======================", "Extra", header.Extra)
 		for i, signer := range snap.signers() {
 			copy(signers[i*common.AddressLength:], signer[:])
 		}
@@ -560,6 +562,14 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	if err != nil {
 		return err
 	}
+	validatorContract := common.Address{}
+	if (c.validatorContract != common.Address{}) {
+		validatorContract = c.validatorContract
+		header.MixDigest = validatorContract.Hash()
+	} else {
+		validatorContract = snap.ValidatorContract
+		header.MixDigest = validatorContract.Hash()
+	}
 	if number%c.config.Clique.Epoch != 0 {
 		c.lock.RLock()
 
@@ -589,6 +599,12 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	// Set the correct difficulty
 	header.Difficulty = calcDifficulty(snap, c.signer)
 	if chain.Config().IsPoS(header.Number) {
+		// Check if the validator contract is valid
+		log.Info("ValidatorContract Validating...", "ValidatorContract", c.config.Clique.ValidatorContract, "snap.ValidatorContract", snap.ValidatorContract, "number", number)
+		if !snap.validValidatorContract(c.config.Clique.ValidatorContract) {
+			log.Error("====================== ValidatorContract invalid ======================", "err", errUnauthorizedSigner)
+			return errUnauthorizedSigner
+		}
 		// header.Difficulty = big.NewInt(1)
 
 		// this code has to be change to get the max number from the range of the validator set in each epoch!
