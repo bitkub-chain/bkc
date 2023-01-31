@@ -566,9 +566,6 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	if (c.validatorContract != common.Address{}) {
 		validatorContract = c.validatorContract
 		header.MixDigest = validatorContract.Hash()
-	} else {
-		validatorContract = snap.ValidatorContract
-		header.MixDigest = validatorContract.Hash()
 	}
 	if number%c.config.Clique.Epoch != 0 {
 		c.lock.RLock()

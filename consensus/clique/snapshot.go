@@ -128,15 +128,16 @@ func (s *Snapshot) store(db ethdb.Database) error {
 // copy creates a deep copy of the snapshot, though not the individual votes.
 func (s *Snapshot) copy() *Snapshot {
 	cpy := &Snapshot{
-		config:    s.config,
-		sigcache:  s.sigcache,
-		Number:    s.Number,
-		Hash:      s.Hash,
-		Signers:   make(map[common.Address]struct{}),
-		Recents:   make(map[uint64]common.Address),
-		Votes:     make([]*Vote, len(s.Votes)),
-		Tally:     make(map[common.Address]Tally),
-		Proposers: make(map[common.Address]uint64),
+		config:            s.config,
+		sigcache:          s.sigcache,
+		Number:            s.Number,
+		Hash:              s.Hash,
+		Signers:           make(map[common.Address]struct{}),
+		Recents:           make(map[uint64]common.Address),
+		Votes:             make([]*Vote, len(s.Votes)),
+		Tally:             make(map[common.Address]Tally),
+		Proposers:         make(map[common.Address]uint64),
+		ValidatorContract: common.Address{},
 	}
 	for signer := range s.Signers {
 		cpy.Signers[signer] = struct{}{}
@@ -150,6 +151,10 @@ func (s *Snapshot) copy() *Snapshot {
 	for address, tally := range s.Tally {
 		cpy.Tally[address] = tally
 	}
+	if (s.ValidatorContract != common.Address{}) {
+		cpy.ValidatorContract = s.ValidatorContract
+	}
+
 	copy(cpy.Votes, s.Votes)
 
 	return cpy
