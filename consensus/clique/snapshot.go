@@ -19,6 +19,7 @@ package clique
 import (
 	"bytes"
 	"encoding/json"
+	"math/big"
 	"sort"
 	"time"
 
@@ -33,9 +34,10 @@ import (
 // Vote represents a single vote that an authorized signer made to modify the
 // list of authorizations.
 type Vote struct {
-	Signer    common.Address `json:"signer"`    // Authorized signer that cast this vote
-	Block     uint64         `json:"block"`     // Block number the vote was cast in (expire old votes)
-	Address   common.Address `json:"address"`   // Account being voted on to change its authorization
+	Signer    common.Address `json:"signer"`  // Authorized signer that cast this vote
+	Block     uint64         `json:"block"`   // Block number the vote was cast in (expire old votes)
+	Address   common.Address `json:"address"` // Account being voted on to change its authorization
+	Type      uint16         `json:"type"`
 	Authorize bool           `json:"authorize"` // Whether to authorize or deauthorize the voted account
 }
 
@@ -57,7 +59,6 @@ type Snapshot struct {
 	Recents           map[uint64]common.Address   `json:"recents"` // Set of recent signers for spam protections
 	Votes             []*Vote                     `json:"votes"`   // List of votes cast in chronological order
 	Tally             map[common.Address]Tally    `json:"tally"`   // Current vote tally to avoid recalculating
-	Proposers         map[common.Address]uint64   `json:"proposers"`
 	ValidatorContract common.Address              `json:"validatorContract"`
 }
 
@@ -80,10 +81,9 @@ func newSnapshot(config *params.ChainConfig, sigcache *lru.ARCCache, number uint
 		Signers:           make(map[common.Address]struct{}),
 		Recents:           make(map[uint64]common.Address),
 		Tally:             make(map[common.Address]Tally),
-		Proposers:         make(map[common.Address]uint64),
 		ValidatorContract: common.Address{},
 	}
-	newProposer := make(map[common.Address]uint64, len(signers))
+	// newProposer := make(map[common.Address]uint64, len(signers))
 
 	for _, signer := range signers {
 		snap.Signers[signer] = struct{}{}
@@ -96,7 +96,7 @@ func newSnapshot(config *params.ChainConfig, sigcache *lru.ARCCache, number uint
 		// }
 	}
 
-	snap.Proposers = newProposer
+	// snap.Proposers = newProposer
 	return snap
 }
 
@@ -136,14 +136,10 @@ func (s *Snapshot) copy() *Snapshot {
 		Recents:           make(map[uint64]common.Address),
 		Votes:             make([]*Vote, len(s.Votes)),
 		Tally:             make(map[common.Address]Tally),
-		Proposers:         make(map[common.Address]uint64),
 		ValidatorContract: common.Address{},
 	}
 	for signer := range s.Signers {
 		cpy.Signers[signer] = struct{}{}
-	}
-	for propose, id := range s.Proposers {
-		cpy.Proposers[propose] = id
 	}
 	for block, signer := range s.Recents {
 		cpy.Recents[block] = signer
@@ -250,13 +246,15 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			return nil, err
 		}
 
-		// if !s.config.IsPoS(header.Number) {
 		if _, ok := snap.Signers[signer]; !ok {
 			return nil, errUnauthorizedSigner
 		}
-		for _, recent := range snap.Recents {
-			if recent == signer {
-				return nil, errRecentlySigned
+
+		if !s.config.IsPoS(new(big.Int).SetUint64(number)) {
+			for _, recent := range snap.Recents {
+				if recent == signer {
+					return nil, errRecentlySigned
+				}
 			}
 		}
 		snap.Recents[number] = signer
@@ -273,34 +271,40 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 				break // only one vote allowed
 			}
 		}
-		// // Tally up the new vote from the signer
-		// var authorize bool
-		// switch {
-		// case bytes.Equal(header.Nonce[:], nonceAuthVote):
-		// 	authorize = true
-		// case bytes.Equal(header.Nonce[:], nonceDropVote):
-		// 	authorize = false
-		// default:
-		// 	return nil, errInvalidVote
-		// }
 
-		validatorContract := s.getVoteAddr(header)
-
-		if (validatorContract != common.Address{}) {
-			if snap.cast(validatorContract, true) {
-				snap.Votes = append(snap.Votes, &Vote{
-					Signer:    signer,
-					Block:     number,
-					Address:   validatorContract,
-					Authorize: true,
-				})
-			}
+		// Tally up the new vote from the signer
+		var authorize bool
+		switch {
+		case bytes.Equal(header.Nonce[:], nonceAuthVote):
+			authorize = true
+		case bytes.Equal(header.Nonce[:], nonceDropVote):
+			authorize = false
+		default:
+			return nil, errInvalidVote
 		}
 
+		validatorContract := s.getValidatorContractAddr(header)
+		if (validatorContract != common.Address{}) {
+			voteAddr = validatorContract
+			authorize = true
+		}
+
+		if snap.cast(voteAddr, authorize) {
+			snap.Votes = append(snap.Votes, &Vote{
+				Signer:    signer,
+				Block:     number,
+				Address:   voteAddr,
+				Authorize: authorize,
+			})
+		}
 		// If the vote passed, update the list of signers
-		if tally := snap.Tally[validatorContract]; tally.Votes > len(snap.Signers)/2 {
+		if tally := snap.Tally[voteAddr]; tally.Votes > len(snap.Signers)/2 {
 			if tally.Authorize {
-				snap.ValidatorContract = validatorContract
+				if validatorContract != (common.Address{}) {
+					snap.ValidatorContract = validatorContract
+				} else {
+					snap.Signers[voteAddr] = struct{}{}
+				}
 			} else {
 				delete(snap.Signers, voteAddr)
 
@@ -330,14 +334,13 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			}
 			delete(snap.Tally, voteAddr)
 		}
-		// } else {
+		// If we're taking too much time (ecrecover), notify the user once a while
 		if time.Since(logged) > 8*time.Second {
 			log.Info("Reconstructing voting history", "processed", i, "total", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
 			logged = time.Now()
 		}
-		// }
 	}
-	// If we're taking too much time (ecrecover), notify the user once a while
+
 	if time.Since(start) > 8*time.Second {
 		log.Info("Reconstructed voting history", "processed", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
 	}
@@ -368,7 +371,21 @@ func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
 
 func (s *Snapshot) getVoteAddr(header *types.Header) common.Address {
 	if s.config.IsErawan(header.Number) {
-		return common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
+		if big.NewInt(0).SetBytes(header.MixDigest[(common.HashLength-common.AddressLength-validatorContractPrefix):(common.HashLength-common.AddressLength)]).Cmp(common.Big0) == 0 {
+			return common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
+		}
+		return common.Address{}
+	} else {
+		return header.Coinbase
+	}
+}
+
+func (s *Snapshot) getValidatorContractAddr(header *types.Header) common.Address {
+	if s.config.IsErawan(header.Number) {
+		if big.NewInt(0).SetBytes(header.MixDigest[(common.HashLength-common.AddressLength-validatorContractPrefix):(common.HashLength-common.AddressLength)]).Cmp(common.Big1) == 0 {
+			return common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
+		}
+		return common.Address{}
 	} else {
 		return header.Coinbase
 	}
