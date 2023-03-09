@@ -83,20 +83,11 @@ func newSnapshot(config *params.ChainConfig, sigcache *lru.ARCCache, number uint
 		Tally:             make(map[common.Address]Tally),
 		ValidatorContract: common.Address{},
 	}
-	// newProposer := make(map[common.Address]uint64, len(signers))
 
 	for _, signer := range signers {
 		snap.Signers[signer] = struct{}{}
-
-		// if config.IsPoS(new(big.Int).SetUint64(number)) {
-		// 	newProposer[signer] = 2
-		// 	if signer == common.HexToAddress("0x48f30fb9b69454b09f8b4691412cf4aa3753fcb1") {
-		// 		newProposer[signer] = 1
-		// 	}
-		// }
 	}
 
-	// snap.Proposers = newProposer
 	return snap
 }
 
@@ -246,11 +237,10 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			return nil, err
 		}
 
-		if _, ok := snap.Signers[signer]; !ok {
-			return nil, errUnauthorizedSigner
-		}
-
 		if !s.config.IsPoS(new(big.Int).SetUint64(number)) {
+			if _, ok := snap.Signers[signer]; !ok {
+				return nil, errUnauthorizedSigner
+			}
 			for _, recent := range snap.Recents {
 				if recent == signer {
 					return nil, errRecentlySigned
