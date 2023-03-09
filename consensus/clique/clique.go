@@ -72,6 +72,8 @@ var (
 
 	diffInTurn = big.NewInt(2) // Block difficulty for in-turn signatures
 	diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
+
+	validatorContractPrefix = 1
 )
 
 // Various error messages to mark blocks invalid. These should be private to
@@ -181,7 +183,8 @@ type Clique struct {
 	recents    *lru.ARCCache // Snapshots for recent block to speed up reorgs
 	signatures *lru.ARCCache // Signatures of recent blocks to speed up mining
 
-	proposals map[common.Address]bool // Current list of proposals we are pushing
+	proposals         map[common.Address]bool // Current list of proposals we are pushing
+	validatorContract common.Address          // Ethereum address of the validator set contract
 
 	signer common.Address // Ethereum address of the signing key
 	signFn SignerFn       // Signer function to authorize hashes with
@@ -217,13 +220,14 @@ func New(
 	}
 
 	return &Clique{
-		config:          &conf,
-		db:              db,
-		recents:         recents,
-		signatures:      signatures,
-		ethAPI:          ethAPI,
-		validatorSetABI: vABI,
-		proposals:       make(map[common.Address]bool),
+		config:            &conf,
+		db:                db,
+		recents:           recents,
+		signatures:        signatures,
+		ethAPI:            ethAPI,
+		validatorSetABI:   vABI,
+		validatorContract: common.Address{},
+		proposals:         make(map[common.Address]bool),
 	}
 }
 
@@ -277,6 +281,10 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	checkpoint := (number % c.config.Clique.Epoch) == 0
 	if chain.Config().IsErawan(header.Number) {
 		voteAddr := c.getVoteAddr(header)
+		voteValidatorContractAddr := c.getValidatorContractAddr(header)
+		if voteValidatorContractAddr != (common.Address{}) {
+			voteAddr = voteValidatorContractAddr
+		}
 		if checkpoint && voteAddr != (common.Address{}) {
 			return errInvalidCheckpointBeneficiary
 		}
@@ -570,9 +578,13 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 				addresses = append(addresses, address)
 			}
 		}
+
 		// If there's pending proposals, cast a vote on them
 		if len(addresses) > 0 {
 			addr := addresses[rand.Intn(len(addresses))]
+			// if (c.validatorContract != common.Address{}) {
+			// header.MixDigest = common.HexToHash("0x0148D6C7f201C4466C877b0Ff1ad05c243D57E0769")
+			// }
 			if chain.Config().IsErawan(header.Number) {
 				header.MixDigest = addr.Hash()
 			} else {
@@ -584,11 +596,28 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 				copy(header.Nonce[:], nonceDropVote)
 			}
 		}
+
+		cpy := make([]byte, common.HashLength)
+		// validatorContract := common.Address{}
+		if c.validatorContract != (common.Address{}) {
+			pvc := common.FromHex("0x01")
+			vc := c.validatorContract.Bytes()
+			copy(cpy[common.HashLength-common.AddressLength-validatorContractPrefix:], pvc)
+			copy(cpy[common.HashLength-common.AddressLength:], vc)
+			header.MixDigest = common.BytesToHash(cpy)
+			c.validatorContract = common.Address{}
+		}
+
 		c.lock.RUnlock()
 	}
 	// Set the correct difficulty
 	header.Difficulty = calcDifficulty(snap, c.signer)
 	if chain.Config().IsPoS(header.Number) {
+		// Check if the validator contract is valid
+		log.Info("ValidatorContract Validating...", "ValidatorContract", c.config.Clique.ValidatorContract, "snap.ValidatorContract", snap.ValidatorContract, "number", number)
+		if !snap.validValidatorContract(c.config.Clique.ValidatorContract) {
+			return errUnauthorizedSigner
+		}
 		// header.Difficulty = big.NewInt(1)
 
 		// this code has to be change to get the max number from the range of the validator set in each epoch!
@@ -700,10 +729,17 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 				}
 			}
 		}
+	} else {
+		isValidator, _ := c.isValidator(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1), signer)
+		if !isValidator {
+			return errUnauthorizedSigner
+		}
+		// if _, authorized := snap.Signers[signer]; !authorized {
+		// 	return errUnauthorizedSigner
+		// }
 	}
 	// Sweet, the protocol permits us to sign the block, wait for our time
 	delay := time.Unix(int64(header.Time), 0).Sub(time.Now()) // nolint: gosimple
-
 	sighash, err := signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, CliqueRLP(header))
 	if err != nil {
 		return err
@@ -712,7 +748,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	if chain.Config().IsPoS(header.Number) {
 		interValidatorAddress, _ := c.getCurrentValidators(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1), new(big.Int).Sub(inturnProducer, common.Big1))
 		// Super Validators
-		superValidators := common.HexToAddress("0x9bbd16c6d2ef041cc2ccccfa0a2724de3273f204")
+		superValidators := common.HexToAddress("0x065cac36eaa04041d88704241933c41aabfe83ee")
 
 		if interValidatorAddress == signer {
 			// Sign all the things!
@@ -847,6 +883,42 @@ func (c *Clique) getCurrentValidators(blockHash common.Hash, blockNumber *big.In
 	return validator[0].(common.Address), nil
 }
 
+func (c *Clique) isValidator(blockHash common.Hash, blockNumber *big.Int, validatorAddress common.Address) (bool, error) {
+	// block
+	blockNr := rpc.BlockNumberOrHashWithHash(blockHash, false)
+
+	// method
+	method := "isValidatorAddress"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // cancel when we are finished consuming integers
+
+	data, err := c.validatorSetABI.Pack(method, validatorAddress)
+	if err != nil {
+		log.Error("Unable to pack tx for getValidators", "error", err)
+		return false, err
+	}
+	// call
+	msgData := (hexutil.Bytes)(data)
+	toAddress := c.config.Clique.ValidatorContract
+	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
+	result, err := c.ethAPI.Call(ctx, ethapi.TransactionArgs{
+		Gas:  &gas,
+		To:   &toAddress,
+		Data: &msgData,
+	}, blockNr, nil)
+	if err != nil {
+		return false, err
+	}
+
+	validator, err := c.validatorSetABI.Unpack(method, result)
+	if err != nil {
+		return false, err
+	}
+
+	return validator[0].(bool), nil
+}
+
 func (c *Clique) getValidators(blockHash common.Hash, blockNumber *big.Int) ([]common.Address, error) {
 	// block
 	blockNr := rpc.BlockNumberOrHashWithHash(blockHash, false)
@@ -940,7 +1012,21 @@ func encodeSigHeader(w io.Writer, header *types.Header) {
 
 func (c *Clique) getVoteAddr(header *types.Header) common.Address {
 	if c.config.IsErawan(header.Number) {
-		return common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
+		if big.NewInt(0).SetBytes(header.MixDigest[(common.HashLength-common.AddressLength-validatorContractPrefix):(common.HashLength-common.AddressLength)]).Cmp(common.Big0) == 0 {
+			return common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
+		}
+		return common.Address{}
+	} else {
+		return header.Coinbase
+	}
+}
+
+func (c *Clique) getValidatorContractAddr(header *types.Header) common.Address {
+	if c.config.IsErawan(header.Number) {
+		if big.NewInt(0).SetBytes(header.MixDigest[(common.HashLength-common.AddressLength-validatorContractPrefix):(common.HashLength-common.AddressLength)]).Cmp(common.Big1) == 0 {
+			return common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
+		}
+		return common.Address{}
 	} else {
 		return header.Coinbase
 	}

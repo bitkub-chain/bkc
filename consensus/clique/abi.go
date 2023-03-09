@@ -1,7 +1,19 @@
 package clique
 
-const validatorSetABI = `
-[
+const validatorSetABI = `[
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "_validator",
+				"type": "address"
+			}
+		],
+		"name": "addValidator",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
 	{
 		"inputs": [],
 		"stateMutability": "nonpayable",
@@ -14,6 +26,13 @@ const validatorSetABI = `
 		"type": "event"
 	},
 	{
+		"inputs": [],
+		"name": "init",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
 		"anonymous": false,
 		"inputs": [],
 		"name": "RemoveValidator",
@@ -22,12 +41,12 @@ const validatorSetABI = `
 	{
 		"inputs": [
 			{
-				"internalType": "address",
-				"name": "_validator",
-				"type": "address"
+				"internalType": "uint256",
+				"name": "_index",
+				"type": "uint256"
 			}
 		],
-		"name": "addValidator",
+		"name": "removeValidatorByIndex",
 		"outputs": [],
 		"stateMutability": "nonpayable",
 		"type": "function"
@@ -46,10 +65,22 @@ const validatorSetABI = `
 		"type": "function"
 	},
 	{
-		"inputs": [],
-		"name": "init",
-		"outputs": [],
-		"stateMutability": "nonpayable",
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "_validator",
+				"type": "address"
+			}
+		],
+		"name": "isValidatorAddress",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
+			}
+		],
+		"stateMutability": "view",
 		"type": "function"
 	},
 	{
@@ -69,19 +100,6 @@ const validatorSetABI = `
 		"inputs": [
 			{
 				"internalType": "uint256",
-				"name": "_index",
-				"type": "uint256"
-			}
-		],
-		"name": "removeValidatorByIndex",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "uint256",
 				"name": "",
 				"type": "uint256"
 			}
@@ -92,6 +110,25 @@ const validatorSetABI = `
 				"internalType": "address",
 				"name": "",
 				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"name": "validatorSetMap",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "active",
+				"type": "bool"
 			}
 		],
 		"stateMutability": "view",
