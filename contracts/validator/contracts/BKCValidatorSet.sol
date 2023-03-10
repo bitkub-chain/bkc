@@ -9,6 +9,7 @@ contract BKCValidatorSet {
     mapping(address =>uint256) public currentValidatorSetMap;
     address[] public validators;
     address public owner;
+    uint256 index = 1;
     uint256 public totalInComing;
 
     struct Validator{
@@ -51,6 +52,7 @@ contract BKCValidatorSet {
         addValidator(0xB05936175536F920B7fC96CCEb24Fecd7BB7F8F8);
         currentValidatorSetMap[0x48F30fb9B69454b09f8b4691412Cf4aa3753fcB1] = 1;
         currentValidatorSetMap[0xB05936175536F920B7fC96CCEb24Fecd7BB7F8F8] = 2;
+        index = 3;
         emit AddValidator();
         // validators.push(0x96C9F2F893AdeF66669B4bB4A7dfA5006c037CD3);
     }
@@ -63,6 +65,8 @@ contract BKCValidatorSet {
         // require(msg.sender == owner, "Only owner can add validators");
         validators.push(_validator);
         validatorSetMap[_validator].active = true;
+        currentValidatorSetMap[_validator] = index;
+        index++;
         emit AddValidator();
 
     }
@@ -100,7 +104,7 @@ contract BKCValidatorSet {
     /*********************** External Functions **************************/
   function deposit(address valAddr) external payable noEmptyDeposit{
     uint256 value = msg.value;
-    uint256 index = currentValidatorSetMap[valAddr];
+    uint256 _index = currentValidatorSetMap[valAddr];
 
     // uint256 curBurnRatio = INIT_BURN_RATIO;
     // if (burnRatioInitialized) {
@@ -117,8 +121,8 @@ contract BKCValidatorSet {
     //   }
     // }
 
-    if (index>0) {
-      Validator storage validator = validatorSetMap[validators[index-1]];
+    if (_index>0) {
+      Validator storage validator = validatorSetMap[validators[_index-1]];
     //   if (validator.jailed) {
     //     // emit deprecatedDeposit(valAddr,value);
     //   } else {
