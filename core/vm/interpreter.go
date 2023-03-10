@@ -18,18 +18,11 @@ package vm
 
 import (
 	"hash"
-	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/log"
 )
-
-var EVMInterpreterPool = sync.Pool{
-	New: func() interface{} {
-		return &EVMInterpreter{}
-	},
-}
 
 // Config are the configuration options for the Interpreter
 type Config struct {
@@ -97,27 +90,21 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 		default:
 			cfg.JumpTable = &frontierInstructionSet
 		}
-		var extraEips []int
-		for _, eip := range cfg.ExtraEips {
+		for i, eip := range cfg.ExtraEips {
 			copy := *cfg.JumpTable
 			if err := EnableEIP(eip, &copy); err != nil {
 				// Disable it, so caller can check if it's activated or not
+				cfg.ExtraEips = append(cfg.ExtraEips[:i], cfg.ExtraEips[i+1:]...)
 				log.Error("EIP activation failed", "eip", eip, "error", err)
-			} else {
-				extraEips = append(extraEips, eip)
 			}
 			cfg.JumpTable = &copy
 		}
-		cfg.ExtraEips = extraEips
-
 	}
-	evmInterpreter := EVMInterpreterPool.Get().(*EVMInterpreter)
-	evmInterpreter.evm = evm
-	evmInterpreter.cfg = cfg
-	evmInterpreter.readOnly = false
-	evmInterpreter.returnData = nil
 
-	return evmInterpreter
+	return &EVMInterpreter{
+		evm: evm,
+		cfg: cfg,
+	}
 }
 
 // Run loops and evaluates the contract's code with the given input data and returns
