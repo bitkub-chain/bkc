@@ -20,6 +20,7 @@ package clique
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -30,14 +31,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/internal/ethapi"
@@ -148,6 +152,12 @@ var (
 
 // SignerFn hashes and signs the data to be signed by a backing account.
 type SignerFn func(signer accounts.Account, mimeType string, message []byte) ([]byte, error)
+type SignerTxFn func(accounts.Account, *types.Transaction, *big.Int) (*types.Transaction, error)
+
+func (c *Clique) isToSystemContract(to common.Address) bool {
+	// return systemContracts[to]
+	return to == c.config.Clique.ValidatorContract
+}
 
 // ecrecover extracts the Ethereum account address from a signed header.
 func ecrecover(header *types.Header, sigcache *lru.ARCCache) (common.Address, error) {
@@ -186,13 +196,16 @@ type Clique struct {
 	proposals         map[common.Address]bool // Current list of proposals we are pushing
 	validatorContract common.Address          // Ethereum address of the validator set contract
 
-	signer common.Address // Ethereum address of the signing key
-	signFn SignerFn       // Signer function to authorize hashes with
-	lock   sync.RWMutex   // Protects the signer fields
+	signer types.Signer
+
+	val      common.Address // Ethereum address of the signing key
+	signFn   SignerFn       // Signer function to authorize hashes with
+	signTxFn SignerTxFn
+
+	lock sync.RWMutex // Protects the signer fields
 
 	ethAPI          *ethapi.PublicBlockChainAPI
 	validatorSetABI abi.ABI
-	slashABI        abi.ABI
 
 	// The fields below are for testing only
 	fakeDiff bool // Skip difficulty verifications
@@ -228,8 +241,35 @@ func New(
 		validatorSetABI:   vABI,
 		validatorContract: common.Address{},
 		proposals:         make(map[common.Address]bool),
+		signer:            types.NewEIP155Signer(config.ChainID),
 	}
 }
+
+func (c *Clique) IsSystemTransaction(tx *types.Transaction, header *types.Header) (bool, error) {
+	// deploy a contract
+	if tx.To() == nil {
+		return false, nil
+	}
+	sender, err := types.Sender(c.signer, tx)
+	if err != nil {
+		return false, errors.New("UnAuthorized transaction")
+	}
+	if sender == header.Coinbase && c.isToSystemContract(*tx.To()) && tx.GasPrice().Cmp(big.NewInt(0)) == 0 {
+		return true, nil
+	}
+	return false, nil
+}
+
+func (c *Clique) Test() bool {
+	return true
+}
+
+// func (c *Clique) IsSystemContract(to *common.Address) bool {
+// 	if to == nil {
+// 		return false
+// 	}
+// 	return isToSystemContract(*to)
+// }
 
 // Author implements consensus.Engine, returning the Ethereum address recovered
 // from the signature in the header's extra-data section.
@@ -390,8 +430,8 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 	// If the block is a checkpoint block, verify the signer list
 	if number%c.config.Clique.Epoch == 0 {
 		signers := make([]byte, len(snap.Signers)*common.AddressLength)
-		for i, signer := range snap.signers() {
-			copy(signers[i*common.AddressLength:], signer[:])
+		for i, val := range snap.signers() {
+			copy(signers[i*common.AddressLength:], val[:])
 		}
 		extraSuffix := len(header.Extra) - extraSeal
 		if !bytes.Equal(header.Extra[extraVanity:extraSuffix], signers) {
@@ -582,9 +622,6 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		// If there's pending proposals, cast a vote on them
 		if len(addresses) > 0 {
 			addr := addresses[rand.Intn(len(addresses))]
-			// if (c.validatorContract != common.Address{}) {
-			// header.MixDigest = common.HexToHash("0x0148D6C7f201C4466C877b0Ff1ad05c243D57E0769")
-			// }
 			if chain.Config().IsErawan(header.Number) {
 				header.MixDigest = addr.Hash()
 			} else {
@@ -611,7 +648,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		c.lock.RUnlock()
 	}
 	// Set the correct difficulty
-	header.Difficulty = calcDifficulty(snap, c.signer)
+	header.Difficulty = calcDifficulty(snap, c.val)
 	if chain.Config().IsPoS(header.Number) {
 		// Check if the validator contract is valid
 		log.Info("ValidatorContract Validating...", "ValidatorContract", c.config.Clique.ValidatorContract, "snap.ValidatorContract", snap.ValidatorContract, "number", number)
@@ -629,8 +666,12 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 
 		// set seed
 		rand.Seed(time.Now().UnixNano())
+
 		// generate random number and print on console
-		index := rand.Intn(max-min) + min
+		index := 0
+		if max > 0 {
+			index = rand.Intn(max-min) + min
+		}
 		header.Difficulty = new(big.Int).Add(big.NewInt(int64(index)), big.NewInt(1))
 	}
 
@@ -661,30 +702,92 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
-func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB, txs []*types.Transaction, uncles []*types.Header) {
-	// No block rewards in PoA, so the state remains as is and uncles are dropped
+func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB, txs *[]*types.Transaction,
+	uncles []*types.Header, receipts *[]*types.Receipt, systemTxs *[]*types.Transaction, usedGas *uint64) error {
+	if chain.Config().IsPoS(header.Number) {
+		cx := chainContext{Chain: chain, clique: c}
+		val := header.Coinbase
+		if systemTxs != nil {
+			err := c.distributeIncoming(val, state, header, cx, txs, receipts, systemTxs, usedGas, false)
+			if err != nil {
+				panic(err)
+			}
+		}
+	}
 	header.Root = state.IntermediateRoot(chain.Config().IsEIP158(header.Number))
 	header.UncleHash = types.CalcUncleHash(nil)
+
+	return nil
 }
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
 // nor block rewards given, and returns the final block.
-func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB, txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {
-	// Finalize block
-	c.Finalize(chain, header, state, txs, uncles)
+func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB,
+	txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, []*types.Receipt, error) {
+
+	if chain.Config().IsPoS(header.Number) {
+		cx := chainContext{Chain: chain, clique: c}
+		if txs == nil {
+			txs = make([]*types.Transaction, 0)
+		}
+		if receipts == nil {
+			receipts = make([]*types.Receipt, 0)
+		}
+		err := c.distributeIncoming(c.val, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true)
+		if err != nil {
+			panic(err)
+		}
+	}
+	header.Root = state.IntermediateRoot(chain.Config().IsEIP158(header.Number))
+	header.UncleHash = types.CalcUncleHash(nil)
 
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, txs, nil, receipts, trie.NewStackTrie(nil)), nil
+	return types.NewBlock(header, txs, nil, receipts, trie.NewStackTrie(nil)), receipts, nil
+}
+
+func (c *Clique) distributeIncoming(val common.Address, state *state.StateDB, header *types.Header, chain core.ChainContext,
+	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error {
+	coinbase := header.Coinbase
+	balance := state.GetBalance(consensus.SystemAddress)
+	if balance.Cmp(common.Big0) <= 0 {
+		return nil
+	}
+	state.SetBalance(consensus.SystemAddress, big.NewInt(0))
+	state.AddBalance(coinbase, balance)
+
+	log.Info("distribute to validator contract", "block hash", header.Hash(), "amount", balance)
+	return c.distributeToValidator(balance, val, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
+}
+
+func (c *Clique) distributeToValidator(amount *big.Int, validator common.Address,
+	state *state.StateDB, header *types.Header, chain core.ChainContext,
+	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error {
+	// method
+	method := "deposit"
+
+	// get packed data
+	data, err := c.validatorSetABI.Pack(method,
+		validator,
+	)
+	if err != nil {
+		log.Error("Unable to pack tx for deposit", "error", err)
+		return err
+	}
+	// get system message
+	msg := c.getSystemMessage(header.Coinbase, c.config.Clique.ValidatorContract, data, amount)
+	// apply message
+	return c.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
 // with.
-func (c *Clique) Authorize(signer common.Address, signFn SignerFn) {
+func (c *Clique) Authorize(val common.Address, signFn SignerFn, signTxFn SignerTxFn) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	c.signer = signer
+	c.val = val
 	c.signFn = signFn
+	c.signTxFn = signTxFn
 }
 
 // Seal implements consensus.Engine, attempting to create a sealed block using
@@ -708,7 +811,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	}
 	// Don't hold the signer fields for the entire sealing procedure
 	c.lock.RLock()
-	signer, signFn := c.signer, c.signFn
+	val, signFn := c.val, c.signFn
 	c.lock.RUnlock()
 
 	// Bail out if we're unauthorized to sign a block
@@ -718,11 +821,11 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	}
 	// If we're amongst the recent signers, wait for the next block
 	if !chain.Config().IsPoS(header.Number) {
-		if _, authorized := snap.Signers[signer]; !authorized {
+		if _, authorized := snap.Signers[val]; !authorized {
 			return errUnauthorizedSigner
 		}
 		for seen, recent := range snap.Recents {
-			if recent == signer {
+			if recent == val {
 				// Signer is among recents, only wait if the current block doesn't shift it out
 				if limit := uint64(len(snap.Signers)/2 + 1); number < limit || seen > number-limit {
 					return errors.New("signed recently, must wait for others")
@@ -730,7 +833,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 			}
 		}
 	} else {
-		isValidator, _ := c.isValidator(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1), signer)
+		isValidator, _ := c.isValidator(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1), val)
 		if !isValidator {
 			return errUnauthorizedSigner
 		}
@@ -739,40 +842,17 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		// }
 	}
 	// Sweet, the protocol permits us to sign the block, wait for our time
-	delay := time.Unix(int64(header.Time), 0).Sub(time.Now()) // nolint: gosimple
-	sighash, err := signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, CliqueRLP(header))
-	if err != nil {
-		return err
-	}
+	delay := time.Until(time.Unix(int64(header.Time), 0))
 
 	if chain.Config().IsPoS(header.Number) {
 		interValidatorAddress, _ := c.getCurrentValidators(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1), new(big.Int).Sub(inturnProducer, common.Big1))
-		// Super Validators
-		superValidators := common.HexToAddress("0x065cac36eaa04041d88704241933c41aabfe83ee")
-
-		if interValidatorAddress == signer {
-			// Sign all the things!
-			sighash, err = signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, CliqueRLP(header))
-			if err != nil {
-				return err
-			}
-		} else {
-
+		if interValidatorAddress != val {
 			// It's not our turn explicitly to sign, delay it a bit
-			wiggle := time.Duration(len(snap.Signers)/2+1) * wiggleTime
+			wiggle := time.Duration(5) * wiggleTime
 			delay += time.Duration(rand.Int63n(int64(wiggle)))
 
 			log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
-
-			if superValidators == signer {
-				// Sign all the things!
-				sighash, err = signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, CliqueRLP(header))
-				if err != nil {
-					return err
-				}
-			}
 		}
-		copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
 	} else {
 		if header.Difficulty.Cmp(diffNoTurn) == 0 {
 			// It's not our turn explicitly to sign, delay it a bit
@@ -781,13 +861,13 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 
 			log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
 		}
-		sighash, err = signFn(accounts.Account{Address: signer}, accounts.MimetypeClique, CliqueRLP(header))
-		if err != nil {
-			return err
-		}
-		copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
 	}
-	// log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
+	sighash, err := signFn(accounts.Account{Address: val}, accounts.MimetypeClique, CliqueRLP(header))
+	if err != nil {
+		return err
+	}
+	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
+	log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
 	go func() {
 		select {
 		case <-stop:
@@ -813,7 +893,7 @@ func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, time uint64, 
 	if err != nil {
 		return nil
 	}
-	return calcDifficulty(snap, c.signer)
+	return calcDifficulty(snap, c.val)
 }
 
 func calcDifficulty(snap *Snapshot, signer common.Address) *big.Int {
@@ -957,10 +1037,73 @@ func (c *Clique) getValidators(blockHash common.Hash, blockNumber *big.Int) ([]c
 	}
 
 	valz := make([]common.Address, len(*ret0))
-	for i, a := range *ret0 {
-		valz[i] = a
-	}
+	copy(valz, *ret0)
+
 	return valz, nil
+}
+
+func (c *Clique) applyTransaction(
+	msg callmsg,
+	state *state.StateDB,
+	header *types.Header,
+	chainContext core.ChainContext,
+	txs *[]*types.Transaction, receipts *[]*types.Receipt,
+	receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool,
+) (err error) {
+	nonce := state.GetNonce(msg.From())
+	expectedTx := types.NewTransaction(nonce, *msg.To(), msg.Value(), msg.Gas(), msg.GasPrice(), msg.Data())
+	expectedHash := c.signer.Hash(expectedTx)
+
+	if msg.From() == c.val && mining {
+		expectedTx, err = c.signTxFn(accounts.Account{Address: msg.From()}, expectedTx, c.config.ChainID)
+		if err != nil {
+			return err
+		}
+	} else {
+		if receivedTxs == nil || len(*receivedTxs) == 0 || (*receivedTxs)[0] == nil {
+			return errors.New("supposed to get a actual transaction, but get none")
+		}
+		actualTx := (*receivedTxs)[0]
+		if !bytes.Equal(c.signer.Hash(actualTx).Bytes(), expectedHash.Bytes()) {
+			return fmt.Errorf("expected tx hash %v, get %v, nonce %d, to %s, value %s, gas %d, gasPrice %s, data %s", expectedHash.String(), actualTx.Hash().String(),
+				expectedTx.Nonce(),
+				expectedTx.To().String(),
+				expectedTx.Value().String(),
+				expectedTx.Gas(),
+				expectedTx.GasPrice().String(),
+				hex.EncodeToString(expectedTx.Data()),
+			)
+		}
+		expectedTx = actualTx
+		// move to next
+		*receivedTxs = (*receivedTxs)[1:]
+	}
+	state.Prepare(expectedTx.Hash(), len(*txs))
+	gasUsed, err := applyMessage(msg, state, header, c.config, chainContext)
+	if err != nil {
+		return err
+	}
+	*txs = append(*txs, expectedTx)
+	var root []byte
+	if c.config.IsByzantium(header.Number) {
+		state.Finalise(true)
+	} else {
+		root = state.IntermediateRoot(c.config.IsEIP158(header.Number)).Bytes()
+	}
+	*usedGas += gasUsed
+	receipt := types.NewReceipt(root, false, *usedGas)
+	receipt.TxHash = expectedTx.Hash()
+	receipt.GasUsed = gasUsed
+
+	// Set the receipt logs and create a bloom for filtering
+	receipt.Logs = state.GetLogs(expectedTx.Hash(), header.Hash())
+	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+	receipt.BlockHash = header.Hash()
+	receipt.BlockNumber = header.Number
+	receipt.TransactionIndex = uint(state.TxIndex())
+	*receipts = append(*receipts, receipt)
+	state.SetNonce(msg.From(), nonce+1)
+	return nil
 }
 
 // SealHash returns the hash of a block prior to it being sealed.
@@ -1030,4 +1173,77 @@ func (c *Clique) getValidatorContractAddr(header *types.Header) common.Address {
 	} else {
 		return header.Coinbase
 	}
+}
+
+// get system message
+func (c *Clique) getSystemMessage(from, toAddress common.Address, data []byte, value *big.Int) callmsg {
+	return callmsg{
+		ethereum.CallMsg{
+			From:     from,
+			Gas:      math.MaxUint64 / 2,
+			GasPrice: big.NewInt(0),
+			Value:    value,
+			To:       &toAddress,
+			Data:     data,
+		},
+	}
+}
+
+// chain context
+type chainContext struct {
+	Chain  consensus.ChainHeaderReader
+	clique consensus.Engine
+}
+
+func (c chainContext) Engine() consensus.Engine {
+	return c.clique
+}
+
+func (c chainContext) GetHeader(hash common.Hash, number uint64) *types.Header {
+	return c.Chain.GetHeader(hash, number)
+}
+
+func (c chainContext) Config() *params.ChainConfig {
+	return c.Chain.Config()
+}
+
+// callmsg implements core.Message to allow passing it as a transaction simulator.
+type callmsg struct {
+	ethereum.CallMsg
+}
+
+func (m callmsg) From() common.Address { return m.CallMsg.From }
+func (m callmsg) Nonce() uint64        { return 0 }
+func (m callmsg) CheckNonce() bool     { return false }
+func (m callmsg) To() *common.Address  { return m.CallMsg.To }
+func (m callmsg) GasPrice() *big.Int   { return m.CallMsg.GasPrice }
+func (m callmsg) Gas() uint64          { return m.CallMsg.Gas }
+func (m callmsg) Value() *big.Int      { return m.CallMsg.Value }
+func (m callmsg) Data() []byte         { return m.CallMsg.Data }
+
+// apply message
+func applyMessage(
+	msg callmsg,
+	state *state.StateDB,
+	header *types.Header,
+	chainConfig *params.ChainConfig,
+	chainContext core.ChainContext,
+) (uint64, error) {
+	// Create a new context to be used in the EVM environment
+	context := core.NewEVMBlockContext(header, chainContext, nil)
+	// Create a new environment which holds all relevant information
+	// about the transaction and calling mechanisms.
+	vmenv := vm.NewEVM(context, vm.TxContext{Origin: msg.From(), GasPrice: big.NewInt(0)}, state, chainConfig, vm.Config{})
+	// Apply the transaction to the current state (included in the env)
+	ret, returnGas, err := vmenv.Call(
+		vm.AccountRef(msg.From()),
+		*msg.To(),
+		msg.Data(),
+		msg.Gas(),
+		msg.Value(),
+	)
+	if err != nil {
+		log.Error("apply message failed", "msg", string(ret), "err", err)
+	}
+	return msg.Gas() - returnGas, err
 }

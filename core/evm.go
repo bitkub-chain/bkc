@@ -35,6 +35,7 @@ type ChainContext interface {
 	// GetHeader returns the hash corresponding to their hash.
 	GetHeader(common.Hash, uint64) *types.Header
 
+	// Get Chain Config
 	Config() *params.ChainConfig
 }
 
@@ -48,7 +49,7 @@ func NewEVMBlockContext(header *types.Header, chain ChainContext, author *common
 
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	if author == nil {
-		if chain.Config().IsErawan(header.Number) {
+		if chain.Config().IsErawan(header.Number) && !chain.Config().IsPoS(header.Number) {
 			beneficiary = header.Coinbase
 		} else {
 			beneficiary, _ = chain.Engine().Author(header)
