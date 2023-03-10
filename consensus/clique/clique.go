@@ -60,9 +60,6 @@ const (
 	inmemorySignatures = 4096 // Number of recent block signatures to keep in memory
 
 	wiggleTime = 500 * time.Millisecond // Random delay (per signer) to allow concurrent signers
-
-	// genesis contracts
-	ValidatorContract = "0x0000000000000000000000000000000000001000"
 )
 
 // Clique proof-of-authority protocol constants.
@@ -81,10 +78,6 @@ var (
 	diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
 
 	validatorContractPrefix = 1
-
-	systemContracts = map[common.Address]bool{
-		common.HexToAddress(ValidatorContract): true,
-	}
 )
 
 // Various error messages to mark blocks invalid. These should be private to
@@ -161,8 +154,9 @@ var (
 type SignerFn func(signer accounts.Account, mimeType string, message []byte) ([]byte, error)
 type SignerTxFn func(accounts.Account, *types.Transaction, *big.Int) (*types.Transaction, error)
 
-func isToSystemContract(to common.Address) bool {
-	return systemContracts[to]
+func (c *Clique) isToSystemContract(to common.Address) bool {
+	// return systemContracts[to]
+	return to == c.config.Clique.ValidatorContract
 }
 
 // ecrecover extracts the Ethereum account address from a signed header.
@@ -260,7 +254,7 @@ func (c *Clique) IsSystemTransaction(tx *types.Transaction, header *types.Header
 	if err != nil {
 		return false, errors.New("UnAuthorized transaction")
 	}
-	if sender == header.Coinbase && isToSystemContract(*tx.To()) && tx.GasPrice().Cmp(big.NewInt(0)) == 0 {
+	if sender == header.Coinbase && c.isToSystemContract(*tx.To()) && tx.GasPrice().Cmp(big.NewInt(0)) == 0 {
 		return true, nil
 	}
 	return false, nil
@@ -780,7 +774,7 @@ func (c *Clique) distributeToValidator(amount *big.Int, validator common.Address
 		return err
 	}
 	// get system message
-	msg := c.getSystemMessage(header.Coinbase, common.HexToAddress(ValidatorContract), data, amount)
+	msg := c.getSystemMessage(header.Coinbase, c.config.Clique.ValidatorContract, data, amount)
 	// apply message
 	return c.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
 }
@@ -848,7 +842,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		// }
 	}
 	// Sweet, the protocol permits us to sign the block, wait for our time
-	delay := time.Unix(int64(header.Time), 0).Sub(time.Now()) // nolint: gosimple
+	delay := time.Until(time.Unix(int64(header.Time), 0))
 
 	if chain.Config().IsPoS(header.Number) {
 		interValidatorAddress, _ := c.getCurrentValidators(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1), new(big.Int).Sub(inturnProducer, common.Big1))
@@ -1043,9 +1037,8 @@ func (c *Clique) getValidators(blockHash common.Hash, blockNumber *big.Int) ([]c
 	}
 
 	valz := make([]common.Address, len(*ret0))
-	for i, a := range *ret0 {
-		valz[i] = a
-	}
+	copy(valz, *ret0)
+
 	return valz, nil
 }
 
