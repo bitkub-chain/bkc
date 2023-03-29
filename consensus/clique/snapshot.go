@@ -228,6 +228,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			snap.Tally = make(map[common.Address]Tally)
 		}
 		// Delete the oldest signer from the recent list to allow it signing again
+		// limit = 2
 		if limit := uint64(len(snap.Signers)/2 + 1); number >= limit {
 			delete(snap.Recents, number-limit)
 		}
@@ -247,6 +248,46 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 				}
 			}
 		}
+		// } else {
+		if s.config.IsPoS(new(big.Int).SetUint64(number)) {
+			if number > 0 && (number+1)%span == 0 {
+				// snap.Recents = make(map[uint64]common.Address)
+				validatorBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
+
+				// get validators from headers and use that for new validator set
+				newValArr, _ := ParseValidators(validatorBytes)
+				if err != nil {
+					return nil, err
+				}
+
+				if err != nil {
+					return nil, err
+				}
+				newVals := make(map[common.Address]struct{}, len(newValArr))
+				for _, val := range newValArr {
+					newVals[val] = struct{}{}
+				}
+
+				oldLimit := len(snap.Signers)/2 + 1
+				newLimit := len(newVals)/2 + 1
+				if newLimit < oldLimit {
+					for i := 0; i < oldLimit-newLimit; i++ {
+						delete(snap.Recents, number-uint64(newLimit)-uint64(i))
+					}
+				}
+				// oldLimit = len(snap.Signers)
+				// newLimit = len(newVals)
+				// if newLimit < oldLimit {
+				// 	for i := 0; i < oldLimit-newLimit; i++ {
+				// 		delete(snap.RecentForkHashes, number-uint64(newLimit)-uint64(i))
+				// 	}
+				// }
+
+				log.Info("====== snapshot ======", "replace whole signers", newVals)
+				snap.Signers = newVals
+			}
+		}
+		// }
 		snap.Recents[number] = signer
 
 		// Header authorized, discard any previous votes from the signer
@@ -353,6 +394,8 @@ func (s *Snapshot) signers() []common.Address {
 // inturn returns if a signer at a given block height is in-turn or not.
 func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
 	signers, offset := s.signers(), 0
+	// 0 < 49,  signers[0] != 0
+	// 500 % 49 = 10
 	for offset < len(signers) && signers[offset] != signer {
 		offset++
 	}
@@ -380,3 +423,26 @@ func (s *Snapshot) getValidatorContractAddr(header *types.Header) common.Address
 		return header.Coinbase
 	}
 }
+
+// Difficulty returns the difficulty for a particular signer at the current snapshot number
+// func (s *Snapshot) Difficulty(signer common.Address) uint64 {
+// 	// if signer is empty
+// 	if bytes.Compare(signer.Bytes(), common.Address{}.Bytes()) == 0 {
+// 		return 1
+// 	}
+
+// 	validators := s.ValidatorSet.Validators
+// 	proposer := s.ValidatorSet.GetProposer().Address
+// 	totalValidators := len(validators)
+
+// 	proposerIndex, _ := s.ValidatorSet.GetByAddress(proposer)
+// 	signerIndex, _ := s.ValidatorSet.GetByAddress(signer)
+
+// 	// temp index
+// 	tempIndex := signerIndex
+// 	if tempIndex < proposerIndex {
+// 		tempIndex = tempIndex + totalValidators
+// 	}
+
+// 	return uint64(totalValidators - (tempIndex - proposerIndex))
+// }

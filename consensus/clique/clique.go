@@ -20,6 +20,7 @@ package clique
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	"math"
 	"math/big"
 	"math/rand"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -78,6 +80,8 @@ var (
 	diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
 
 	validatorContractPrefix = 1
+
+	span = uint64(50)
 )
 
 // Various error messages to mark blocks invalid. These should be private to
@@ -155,8 +159,13 @@ type SignerFn func(signer accounts.Account, mimeType string, message []byte) ([]
 type SignerTxFn func(accounts.Account, *types.Transaction, *big.Int) (*types.Transaction, error)
 
 func (c *Clique) isToSystemContract(to common.Address) bool {
-	// return systemContracts[to]
-	return to == c.config.Clique.ValidatorContract
+	systemContracts := map[common.Address]bool{
+		c.config.Clique.ValidatorContract:      true,
+		c.config.Clique.StakingManagerContract: true,
+	}
+	log.Info("======== clique ======= : ", "systemContracts", systemContracts)
+	return systemContracts[to]
+	// return to == c.config.Clique.ValidatorContract
 }
 
 // ecrecover extracts the Ethereum account address from a signed header.
@@ -204,11 +213,34 @@ type Clique struct {
 
 	lock sync.RWMutex // Protects the signer fields
 
-	ethAPI          *ethapi.PublicBlockChainAPI
-	validatorSetABI abi.ABI
+	ethAPI           *ethapi.PublicBlockChainAPI
+	stakingManageABI abi.ABI
+	validatorSetABI  abi.ABI
 
 	// The fields below are for testing only
 	fakeDiff bool // Skip difficulty verifications
+}
+
+// Validator represets Volatile state for each Validator
+type Validator struct {
+	Address     common.Address `json:"signer"`
+	VotingPower int64          `json:"power"`
+	// ProposerPriority int64          `json:"accum"`
+}
+
+// NewValidator creates new validator
+func NewValidator(address common.Address, votingPower int64) *Validator {
+	return &Validator{
+		Address:     address,
+		VotingPower: votingPower,
+	}
+}
+
+// MinimalVal is the minimal validator representation
+// Used to send validator information to bor validator contract
+type MinimalVal struct {
+	Signer      common.Address `json:"signer"`
+	VotingPower uint64         `json:"power"`
 }
 
 // New creates a Clique proof-of-authority consensus engine with the initial
@@ -231,17 +263,21 @@ func New(
 	if err != nil {
 		panic(err)
 	}
+	sABI, err := abi.JSON(strings.NewReader(stakingManageABI))
+	if err != nil {
+		panic(err)
+	}
 
 	return &Clique{
-		config:            &conf,
-		db:                db,
-		recents:           recents,
-		signatures:        signatures,
-		ethAPI:            ethAPI,
-		validatorSetABI:   vABI,
-		validatorContract: common.Address{},
-		proposals:         make(map[common.Address]bool),
-		signer:            types.NewEIP155Signer(config.ChainID),
+		config:           &conf,
+		db:               db,
+		recents:          recents,
+		signatures:       signatures,
+		ethAPI:           ethAPI,
+		validatorSetABI:  vABI,
+		stakingManageABI: sABI,
+		proposals:        make(map[common.Address]bool),
+		signer:           types.NewEIP155Signer(config.ChainID),
 	}
 }
 
@@ -350,11 +386,17 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	if len(header.Extra) < extraVanity+extraSeal {
 		return errMissingSignature
 	}
+
+	if chain.Config().IsPoS(header.Number) {
+		checkpoint = (number+1)%span == 0
+	}
+
 	// Ensure that the extra-data contains a signer list on checkpoint, but none otherwise
 	signersBytes := len(header.Extra) - extraVanity - extraSeal
 	if !checkpoint && signersBytes != 0 {
 		return errExtraSigners
 	}
+
 	if checkpoint && signersBytes%common.AddressLength != 0 {
 		return errInvalidCheckpointSigners
 	}
@@ -434,8 +476,10 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 			copy(signers[i*common.AddressLength:], val[:])
 		}
 		extraSuffix := len(header.Extra) - extraSeal
-		if !bytes.Equal(header.Extra[extraVanity:extraSuffix], signers) {
-			return errMismatchingCheckpointSigners
+		if !chain.Config().IsPoS(header.Number) {
+			if !bytes.Equal(header.Extra[extraVanity:extraSuffix], signers) {
+				return errMismatchingCheckpointSigners
+			}
 		}
 	}
 	// All basic checks passed, verify the seal and return
@@ -583,6 +627,17 @@ func (c *Clique) verifySealPoS(snap *Snapshot, header *types.Header, parents []*
 	if number == 0 {
 		return errUnknownBlock
 	}
+
+	// signer, err := ecrecover(header, c.signatures)
+	// if err != nil {
+	// 	return err
+	// }
+
+	// difficulty := snap.Difficulty(signer)
+	// if header.Difficulty.Uint64() != difficulty {
+	// 	return &WrongDifficultyError{number, difficulty, header.Difficulty.Uint64(), signer.Bytes()}
+	// }
+
 	// Resolve the authorization key and check against signers
 	// signer, err := ecrecover(header, c.signatures)
 	// if err != nil {
@@ -649,31 +704,30 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	}
 	// Set the correct difficulty
 	header.Difficulty = calcDifficulty(snap, c.val)
-	if chain.Config().IsPoS(header.Number) {
-		// Check if the validator contract is valid
-		log.Info("ValidatorContract Validating...", "ValidatorContract", c.config.Clique.ValidatorContract, "snap.ValidatorContract", snap.ValidatorContract, "number", number)
-		if !snap.validValidatorContract(c.config.Clique.ValidatorContract) {
-			return errUnauthorizedSigner
-		}
-		// header.Difficulty = big.NewInt(1)
+	// if chain.Config().IsPoS(header.Number) {
+	// Check if the validator contract is valid
+	// if !snap.validValidatorContract(c.config.Clique.ValidatorContract) {
+	// 	return errUnauthorizedSigner
+	// }
+	// header.Difficulty = big.NewInt(1)
 
-		// this code has to be change to get the max number from the range of the validator set in each epoch!
-		// this code use to random the index number of the next block producer from the range of validator set,
-		// and push into the difficulty of block header
-		interValidatorAddress, _ := c.getValidators(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1))
-		min := 0
-		max := len(interValidatorAddress)
+	// this code has to be change to get the max number from the range of the validator set in each epoch!
+	// this code use to random the index number of the next block producer from the range of validator set,
+	// and push into the difficulty of block header
+	// interValidatorAddress, _ := c.getValidators(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1))
+	// min := 0
+	// max := len(interValidatorAddress)
 
-		// set seed
-		rand.Seed(time.Now().UnixNano())
+	// // set seed
+	// rand.Seed(time.Now().UnixNano())
 
-		// generate random number and print on console
-		index := 0
-		if max > 0 {
-			index = rand.Intn(max-min) + min
-		}
-		header.Difficulty = new(big.Int).Add(big.NewInt(int64(index)), big.NewInt(1))
-	}
+	// // generate random number and print on console
+	// index := 0
+	// if max > 0 {
+	// 	index = rand.Intn(max-min) + min
+	// }
+	// header.Difficulty = new(big.Int).Add(big.NewInt(int64(index)), big.NewInt(1))
+	// }
 
 	// Ensure the extra data has all its components
 	if len(header.Extra) < extraVanity {
@@ -682,23 +736,186 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	header.Extra = header.Extra[:extraVanity]
 
 	if number%c.config.Clique.Epoch == 0 {
-		for _, signer := range snap.signers() {
-			header.Extra = append(header.Extra, signer[:]...)
+		if !chain.Config().IsPoS(header.Number) {
+			for _, signer := range snap.signers() {
+				header.Extra = append(header.Extra, signer[:]...)
+			}
 		}
 	}
-	header.Extra = append(header.Extra, make([]byte, extraSeal)...)
+	if chain.Config().IsPoS(header.Number) {
+		if (number+1)%span == 0 {
+			newValidators, err := c.GetCurrentValidators(header.ParentHash, new(big.Int).Add(header.Number, common.Big1))
+			if err != nil {
+				return errors.New("unknown validators")
+			}
+
+			// sort validator by address
+			for _, validator := range newValidators {
+				header.Extra = append(header.Extra, validator.HeaderBytes()...)
+			}
+		}
+	}
 
 	// Ensure the timestamp has the correct delay
 	parent := chain.GetHeader(header.ParentHash, number-1)
 	if parent == nil {
 		return consensus.ErrUnknownAncestor
 	}
+
+	// slots = 50
+	// span := uint64(5)
+	// if (number+1)%span == 0 {
+	// 	if chain.Config().IsPoS(header.Number) {
+	// 		// newValidators, _ := c.getNextValidatorSet(parent)
+	// 		// IDToPower := make(map[int]int)
+	// 		// tempCheck := make([]int, 0)
+
+	// 		// for _, ID := range newValidators {
+	// 		// 	IDToPower[ID] = newValidators[ID] + 1
+	// 		// }
+
+	// 		// for key, value := range newValidators {
+	// 		// 	if val, ok := k.sk.GetValidatorFromValID(ctx, hmTypes.NewValidatorID(key)); ok {
+	// 		// 		val.VotingPower = int64(value)
+	// 		// 		vals = append(vals, val)
+	// 		// 	}
+	// 		// } // sort by address
+
+	// 		// if err != nil {
+	// 		// 	return errors.New("unknown validators")
+	// 		// }
+	// 		// for _, validator := range newValidators {
+	// 		// 	header.Extra = append(header.Extra, validator.HeaderBytes()...)
+	// 		// }
+
+	// 		// tempValidator := make([]Validator, 0)
+	// 		// // remove duplicate validator address
+	// 		// for _, value := range newValidators {
+	// 		// 	if len(tempValidator) == 0 || !contains(tempCheck, int(value.ID)) {
+	// 		// 		tempValidator = append(tempValidator, value)
+	// 		// 		tempCheck = append(tempCheck, int(value.ID))
+	// 		// 	}
+	// 		// }
+
+	// 		// vals := SortByVotingPower(tempValidator)
+	// 		// sort.Ints(tempCheck[:])
+
+	// 		// // get validators bytes
+	// 		// var validators []MinimalVal
+	// 		// for _, val := range vals {
+	// 		// 	validators = append(validators, val.MinimalVal())
+	// 		// }
+	// 		// validatorBytes, _ := rlp.EncodeToBytes(validators)
+	// 		// log.Info("====== clique ======", "hex_validatorBytes", hex.EncodeToString(validatorBytes))
+
+	// 		// for _, validator := range vals {
+	// 		// 	header.Extra = append(header.Extra, validator.HeaderBytes()...)
+	// 		// }
+
+	// 		// tempCheck = make([]uint64, 0)
+	// 		// for _, value := range vals {
+	// 		// 	tempCheck = append(tempCheck, value.ID)
+	// 		// }
+
+	// 		// sort.Ints(vals[:])
+	// 		// log.Info("==== clique ====", "vals", tempCheck, "total", len(tempCheck), "max", 50)
+	// 	}
+	// }
+
+	header.Extra = append(header.Extra, make([]byte, extraSeal)...)
+
 	header.Time = parent.Time + c.config.Clique.Period
 	if header.Time < uint64(time.Now().Unix()) {
 		header.Time = uint64(time.Now().Unix())
 	}
 	return nil
 }
+
+// MinimalVal returns block number of last validator update
+func (v *Validator) MinimalVal() MinimalVal {
+	return MinimalVal{
+		Signer:      v.Address,
+		VotingPower: uint64(v.VotingPower),
+	}
+}
+
+func ParseValidatorsAndPower(validatorsBytes []byte) ([]*Validator, error) {
+	if len(validatorsBytes)%40 != 0 {
+		return nil, errors.New("Invalid validators bytes")
+	}
+
+	result := make([]*Validator, len(validatorsBytes)/40)
+	for i := 0; i < len(validatorsBytes); i += 40 {
+		address := make([]byte, 20)
+		power := make([]byte, 20)
+
+		copy(address, validatorsBytes[i:i+20])
+		copy(power, validatorsBytes[i+20:i+40])
+
+		result[i/40] = NewValidator(common.BytesToAddress(address), big.NewInt(0).SetBytes(power).Int64())
+	}
+
+	return result, nil
+}
+
+func ParseValidators(validatorsBytes []byte) ([]common.Address, error) {
+	if len(validatorsBytes)%40 != 0 {
+		return nil, errors.New("Invalid validators bytes")
+	}
+
+	result := make([]common.Address, len(validatorsBytes)/40)
+	for i := 0; i < len(validatorsBytes); i += 40 {
+		address := make([]byte, 20)
+		// power := make([]byte, 20)
+
+		copy(address, validatorsBytes[i:i+20])
+		// copy(power, validatorsBytes[i+20:i+40])
+
+		result[i/40] = common.BytesToAddress(address)
+	}
+
+	return result, nil
+}
+
+func contains(elems []common.Address, v common.Address) bool {
+	for _, s := range elems {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+func SortByVotingPower(a []Validator) []Validator {
+	sort.Slice(a, func(i, j int) bool {
+		return a[i].VotingPower-a[j].VotingPower > 0
+	})
+	return a
+}
+
+func (v *Validator) HeaderBytes() []byte {
+	result := make([]byte, 40)
+	copy(result[:20], v.Address.Bytes())
+	copy(result[20:], v.PowerBytes())
+	return result
+}
+
+// PowerBytes return power bytes
+func (v *Validator) PowerBytes() []byte {
+	powerBytes := big.NewInt(0).SetInt64(v.VotingPower).Bytes()
+	result := make([]byte, 20)
+	copy(result[20-len(powerBytes):], powerBytes)
+	return result
+}
+
+// To remove later
+// IDBytes return power bytes
+// func (v *Validator) IDBytes() []byte {
+// 	// powerBytes := big.NewInt(0).SetUint64(v.ID).Bytes()
+// 	result := make([]byte, 20)
+// 	copy(result[20-len(powerBytes):], powerBytes)
+// 	return result
+// }
 
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
@@ -708,10 +925,21 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 		cx := chainContext{Chain: chain, clique: c}
 		val := header.Coinbase
 		if systemTxs != nil {
+			if header.Number.Uint64()%span == (span/2)+1 {
+				// log.Info("======= run commit span ========")
+				err := c.commitSpan(c.val, state, header, cx, txs, receipts, systemTxs, usedGas, false)
+				if err != nil {
+					panic(err)
+				}
+			}
 			err := c.distributeIncoming(val, state, header, cx, txs, receipts, systemTxs, usedGas, false)
 			if err != nil {
 				panic(err)
 			}
+			// err := c.distributeIncoming(val, state, header, cx, txs, receipts, systemTxs, usedGas, false)
+			// if err != nil {
+			// 	panic(err)
+			// }
 		}
 	}
 	header.Root = state.IntermediateRoot(chain.Config().IsEIP158(header.Number))
@@ -725,6 +953,7 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB,
 	txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, []*types.Receipt, error) {
 
+	log.Info("======== clique system contract======== : ", "vc", c.config.Clique.ValidatorContract, "sc", c.config.Clique.StakingManagerContract)
 	if chain.Config().IsPoS(header.Number) {
 		cx := chainContext{Chain: chain, clique: c}
 		if txs == nil {
@@ -733,6 +962,14 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 		if receipts == nil {
 			receipts = make([]*types.Receipt, 0)
 		}
+
+		if header.Number.Uint64()%span == (span/2)+1 {
+			err := c.commitSpan(c.val, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true)
+			if err != nil {
+				panic(err)
+			}
+		}
+
 		err := c.distributeIncoming(c.val, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true)
 		if err != nil {
 			panic(err)
@@ -763,10 +1000,10 @@ func (c *Clique) distributeToValidator(amount *big.Int, validator common.Address
 	state *state.StateDB, header *types.Header, chain core.ChainContext,
 	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error {
 	// method
-	method := "deposit"
+	method := "depositReward"
 
 	// get packed data
-	data, err := c.validatorSetABI.Pack(method,
+	data, err := c.stakingManageABI.Pack(method,
 		validator,
 	)
 	if err != nil {
@@ -774,9 +1011,140 @@ func (c *Clique) distributeToValidator(amount *big.Int, validator common.Address
 		return err
 	}
 	// get system message
-	msg := c.getSystemMessage(header.Coinbase, c.config.Clique.ValidatorContract, data, amount)
+	msg := c.getSystemMessage(header.Coinbase, c.config.Clique.StakingManagerContract, data, amount)
 	// apply message
 	return c.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
+}
+
+func (c *Clique) commitSpan(val common.Address, state *state.StateDB, header *types.Header, chain core.ChainContext,
+	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error {
+
+	blockNr := rpc.BlockNumberOrHashWithHash(header.ParentHash, false)
+	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+
+	method := "currentSpanNumber"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // cancel when we are finished consuming integers
+
+	data, err := c.validatorSetABI.Pack(method)
+	if err != nil {
+		log.Error("Unable to pack tx for deposit", "error", err)
+		return err
+	}
+
+	msgData := (hexutil.Bytes)(data)
+	toAddress := c.config.Clique.ValidatorContract
+	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
+	result, _ := c.ethAPI.Call(ctx, ethapi.TransactionArgs{
+		Gas:  &gas,
+		To:   &toAddress,
+		Data: &msgData,
+	}, blockNr, nil)
+
+	var ret0 *big.Int
+
+	if err := c.validatorSetABI.UnpackIntoInterface(&ret0, method, result); err != nil {
+		return err
+	}
+
+	method = "spans"
+	data, err = c.validatorSetABI.Pack(
+		method,
+		ret0)
+	if err != nil {
+		log.Error("Unable to pack tx for deposit", "error", err)
+		return err
+	}
+
+	msgData = (hexutil.Bytes)(data)
+	toAddress = c.config.Clique.ValidatorContract
+	gas = (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
+	result, _ = c.ethAPI.Call(ctx, ethapi.TransactionArgs{
+		Gas:  &gas,
+		To:   &toAddress,
+		Data: &msgData,
+	}, blockNr, nil)
+
+	ret1 := new(struct {
+		Number     *big.Int
+		StartBlock *big.Int
+		EndBlock   *big.Int
+	})
+
+	if err := c.validatorSetABI.UnpackIntoInterface(ret1, method, result); err != nil {
+		return err
+	}
+
+	newValidators, _ := c.selectNextValidatorSet(parent)
+	tempCheck := make([]common.Address, 0)
+
+	// for _, ID := range newValidators {
+	// 	IDToPower[ID] = newValidators[ID] + 1
+	// }
+
+	// for key, value := range newValidators {
+	// 	if val, ok := k.sk.GetValidatorFromValID(ctx, hmTypes.NewValidatorID(key)); ok {
+	// 		val.VotingPower = int64(value)
+	// 		vals = append(vals, val)
+	// 	}
+	// } // sort by address
+
+	// if err != nil {
+	// 	return errors.New("unknown validators")
+	// }
+	// for _, validator := range newValidators {
+	// 	header.Extra = append(header.Extra, validator.HeaderBytes()...)
+	// }
+
+	tempValidator := make([]Validator, 0)
+	// remove duplicate validator address
+	for _, value := range newValidators {
+		if len(tempValidator) == 0 || !contains(tempCheck, value.Address) {
+			tempValidator = append(tempValidator, value)
+			tempCheck = append(tempCheck, value.Address)
+		}
+	}
+
+	vals := SortByVotingPower(tempValidator)
+
+	log.Info("==== clique ====", "vals", vals, "total", len(vals), "max", 50)
+
+	// get validators bytes
+	var validators []MinimalVal
+	for _, val := range vals {
+		validators = append(validators, val.MinimalVal())
+	}
+	// log.Info("====== clique ======", "vals", validators)
+	validatorBytes, _ := rlp.EncodeToBytes(validators)
+	// log.Info("====== clique ======", "validatorBytes", validatorBytes)
+	// log.Info("====== clique ======", "hex_validatorBytes", hex.EncodeToString(validatorBytes))
+	// log.Info("====== cliuqe =====", "currentSpan", ret0)
+
+	method = "commitSpan"
+	// get packed data
+	data, _ = c.validatorSetABI.Pack(method,
+		new(big.Int).Add(ret0, common.Big1),
+		new(big.Int).Add(ret1.EndBlock, common.Big1),
+		new(big.Int).Add(ret1.EndBlock, big.NewInt(50)),
+		validatorBytes,
+	)
+	if err != nil {
+		log.Error("Unable to pack tx for deposit", "error", err)
+		return err
+	}
+	// get system message
+	msg := c.getSystemMessage(header.Coinbase, c.config.Clique.ValidatorContract, data, common.Big0)
+	// log.Info("======= clique ========", "msg", msg)
+	// apply message
+	return c.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
+	// return nil
+
+	// return nil
+	// if err != nil {
+	// 	log.Error("Unable to pack tx for deposit", "error", err)
+	// 	return err
+	// }
+
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
@@ -800,7 +1168,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 
 	// Getting index of intern producer from the difficulty in the previous block
 	// inturnProducer := new(big.Int).Add(chain.GetHeaderByNumber(number-1).Difficulty, big.NewInt(1))
-	inturnProducer := chain.GetHeaderByNumber(number - 1).Difficulty
+	// inturnProducer := chain.GetHeaderByNumber(number - 1).Difficulty
 
 	if number == 0 {
 		return errUnknownBlock
@@ -832,41 +1200,75 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 				}
 			}
 		}
-	} else {
-		isValidator, _ := c.isValidator(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1), val)
-		if !isValidator {
-			return errUnauthorizedSigner
-		}
-		// if _, authorized := snap.Signers[signer]; !authorized {
-		// 	return errUnauthorizedSigner
-		// }
 	}
+	// } else {
+	// isValidator, _ := c.isValidator(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1), val)
+	// if !isValidator {
+	// 	return errUnauthorizedSigner
+	// }
+	// if _, authorized := snap.Signers[signer]; !authorized {
+	// 	return errUnauthorizedSigner
+	// }
+	// }
 	// Sweet, the protocol permits us to sign the block, wait for our time
 	delay := time.Until(time.Unix(int64(header.Time), 0))
 
-	if chain.Config().IsPoS(header.Number) {
-		interValidatorAddress, _ := c.getCurrentValidators(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1), new(big.Int).Sub(inturnProducer, common.Big1))
-		if interValidatorAddress != val {
-			// It's not our turn explicitly to sign, delay it a bit
-			wiggle := time.Duration(5) * wiggleTime
-			delay += time.Duration(rand.Int63n(int64(wiggle)))
+	if header.Difficulty.Cmp(diffNoTurn) == 0 {
+		// It's not our turn explicitly to sign, delay it a bit
+		wiggle := time.Duration(len(snap.Signers)/2+1) * wiggleTime
+		delay += time.Duration(rand.Int63n(int64(wiggle)))
 
-			log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
-		}
-	} else {
-		if header.Difficulty.Cmp(diffNoTurn) == 0 {
-			// It's not our turn explicitly to sign, delay it a bit
-			wiggle := time.Duration(len(snap.Signers)/2+1) * wiggleTime
-			delay += time.Duration(rand.Int63n(int64(wiggle)))
-
-			log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
-		}
+		log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
 	}
+
+	// if chain.Config().IsPoS(header.Number) {
+	// 	// interValidatorAddress, _ := c.getCurrentValidators(header.ParentHash, new(big.Int).Sub(header.Number, common.Big1), new(big.Int).Sub(inturnProducer, common.Big1))
+	// 	if val != common.HexToAddress("0x065Cac36eaa04041D88704241933c41aabFe83eE") {
+	// 		// It's not our turn explicitly to sign, delay it a bit
+	// 		wiggle := time.Duration(5) * wiggleTime
+	// 		delay += time.Duration(rand.Int63n(int64(wiggle)))
+
+	// 		log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
+	// 	}
+	// } else {
+	// 	if header.Difficulty.Cmp(diffNoTurn) == 0 {
+	// 		// It's not our turn explicitly to sign, delay it a bit
+	// 		wiggle := time.Duration(len(snap.Signers)/2+1) * wiggleTime
+	// 		delay += time.Duration(rand.Int63n(int64(wiggle)))
+
+	// 		log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
+	// 	}
+	// }
+	// sighash, err := signFn(accounts.Account{Address: val}, accounts.MimetypeClique, CliqueRLP(header))
+	// if err != nil {
+	// 	return err
+	// }
+	// copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
+	// log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
+	// go func() {
+	// 	select {
+	// 	case <-stop:
+	// 		return
+	// 	case <-time.After(delay):
+	// 	}
+
+	// 	select {
+	// 	case results <- block.WithSeal(header):
+	// 	default:
+	// 		log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
+	// 	}
+	// }()
+
+	log.Info("Sealing block with", "number", number, "delay", delay, "headerDifficulty", header.Difficulty, "val", val.Hex())
+
+	// Sign all the things!
 	sighash, err := signFn(accounts.Account{Address: val}, accounts.MimetypeClique, CliqueRLP(header))
 	if err != nil {
 		return err
 	}
 	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
+
+	// Wait until sealing is terminated or delay timeout.
 	log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
 	go func() {
 		select {
@@ -881,6 +1283,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 			log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
 		}
 	}()
+
 	return nil
 }
 
@@ -897,6 +1300,7 @@ func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, time uint64, 
 }
 
 func calcDifficulty(snap *Snapshot, signer common.Address) *big.Int {
+	log.Info("========= caleDifficulty ========", "snap", snap.Number+1, "signer", signer, "is_inturn", snap.inturn(snap.Number+1, signer))
 	if snap.inturn(snap.Number+1, signer) {
 		return new(big.Int).Set(diffInTurn)
 	}
@@ -927,20 +1331,23 @@ func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 // ==========================  interaction with contract/account =========
 
 // getCurrentValidators get current validators
-func (c *Clique) getCurrentValidators(blockHash common.Hash, blockNumber *big.Int, index *big.Int) (common.Address, error) {
+func (c *Clique) GetCurrentValidators(headerHash common.Hash, blockNumber *big.Int) ([]*Validator, error) {
 	// block
-	blockNr := rpc.BlockNumberOrHashWithHash(blockHash, false)
+	blockNr := rpc.BlockNumberOrHashWithHash(headerHash, false)
 
 	// method
-	method := "validators"
+	method := "getValidators"
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel() // cancel when we are finished consuming integers
 
-	data, err := c.validatorSetABI.Pack(method, index)
+	data, err := c.validatorSetABI.Pack(
+		method,
+		blockNumber,
+	)
 	if err != nil {
 		log.Error("Unable to pack tx for getValidators", "error", err)
-		return common.Address{}, err
+		return nil, err
 	}
 	// call
 	msgData := (hexutil.Bytes)(data)
@@ -952,15 +1359,32 @@ func (c *Clique) getCurrentValidators(blockHash common.Hash, blockNumber *big.In
 		Data: &msgData,
 	}, blockNr, nil)
 	if err != nil {
-		return common.Address{}, err
+		panic(err)
+		// return nil, err
 	}
 
-	validator, err := c.validatorSetABI.Unpack(method, result)
-	if err != nil {
-		return common.Address{}, err
+	var (
+		ret0 = new([]common.Address)
+		ret1 = new([]*big.Int)
+	)
+	out := &[]interface{}{
+		ret0,
+		ret1,
 	}
 
-	return validator[0].(common.Address), nil
+	if err := c.validatorSetABI.UnpackIntoInterface(out, method, result); err != nil {
+		return nil, err
+	}
+
+	valz := make([]*Validator, len(*ret0))
+	for i, a := range *ret0 {
+		valz[i] = &Validator{
+			Address:     a,
+			VotingPower: (*ret1)[i].Int64(),
+		}
+	}
+
+	return valz, nil
 }
 
 func (c *Clique) isValidator(blockHash common.Hash, blockNumber *big.Int, validatorAddress common.Address) (bool, error) {
@@ -999,12 +1423,100 @@ func (c *Clique) isValidator(blockHash common.Hash, blockNumber *big.Int, valida
 	return validator[0].(bool), nil
 }
 
+func (c *Clique) selectNextValidatorSet(parent *types.Header) ([]Validator, error) {
+	// selectedProducers := make([]int, 0)
+	selectedProducers := make([]Validator, 0)
+
+	seedBytes := ToBytes32(parent.Hash().Bytes()[:32])
+	seed := int64(binary.BigEndian.Uint64(seedBytes[:]))
+	rand.Seed(seed)
+
+	newValidators, _ := c.GetElgibleValidators(parent.Hash(), parent.Number.Uint64())
+	// log.Info("====== clique =======", "newValidators", newValidators)
+
+	// weighted range from validators' voting power
+	votingPower := make([]uint64, len(newValidators))
+	for idx, validator := range newValidators {
+		votingPower[idx] = uint64(validator.VotingPower)
+	}
+
+	weightedRanges, totalVotingPower := createWeightedRanges(votingPower)
+
+	log.Info("====== clique =======", "totalVotingPower", totalVotingPower, "weightedRanges", weightedRanges)
+	for i := uint64(0); i < 50; i++ {
+		/*
+			random must be in [1, totalVotingPower] to avoid situation such as
+			2 validators with 1 staking power each.
+			Weighted range will look like (1, 2)
+			Rolling inclusive will have a range of 0 - 2, making validator with staking power 1 chance of selection = 66%
+		*/
+		targetWeight := randomRangeInclusive(1, totalVotingPower)
+		index := binarySearch(weightedRanges, targetWeight)
+		// newValidators[index].ID = uint64(index)
+		selectedProducers = append(selectedProducers, *newValidators[index])
+	}
+
+	return selectedProducers[:50], nil
+}
+
+func binarySearch(array []uint64, search uint64) int {
+	if len(array) == 0 {
+		return -1
+	}
+	l := 0
+	r := len(array) - 1
+	for l < r {
+		mid := (l + r) / 2
+		if array[mid] >= search {
+			r = mid
+		} else {
+			l = mid + 1
+		}
+	}
+	return l
+}
+
+// randomRangeInclusive produces unbiased pseudo random in the range [min, max]. Uses rand.Uint64() and can be seeded beforehand.
+func randomRangeInclusive(min uint64, max uint64) uint64 {
+	if max <= min {
+		return max
+	}
+
+	rangeLength := max - min + 1
+	maxAllowedValue := math.MaxUint64 - math.MaxUint64%rangeLength - 1
+	randomValue := rand.Uint64()
+
+	// reject anything that is beyond the reminder to avoid bias
+	for randomValue >= maxAllowedValue {
+		randomValue = rand.Uint64()
+	}
+
+	return min + randomValue%rangeLength
+}
+
+// createWeightedRanges converts array [1, 2, 3] into cumulative form [1, 3, 6]
+func createWeightedRanges(weights []uint64) ([]uint64, uint64) {
+	weightedRanges := make([]uint64, len(weights))
+	totalWeight := uint64(0)
+	for i := 0; i < len(weightedRanges); i++ {
+		totalWeight += weights[i]
+		weightedRanges[i] = totalWeight
+	}
+	return weightedRanges, totalWeight
+}
+
+func ToBytes32(x []byte) [32]byte {
+	var y [32]byte
+	copy(y[:], x)
+	return y
+}
+
 func (c *Clique) getValidators(blockHash common.Hash, blockNumber *big.Int) ([]common.Address, error) {
 	// block
 	blockNr := rpc.BlockNumberOrHashWithHash(blockHash, false)
 
 	// method
-	method := "getValidators"
+	method := "getElgibleValidator"
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel() // cancel when we are finished consuming integers
@@ -1246,4 +1758,70 @@ func applyMessage(
 		log.Error("apply message failed", "msg", string(ret), "err", err)
 	}
 	return msg.Gas() - returnGas, err
+}
+
+// GetCurrentValidators get current validators
+func (c *Clique) GetElgibleValidators(headerHash common.Hash, blockNumber uint64) ([]*Validator, error) {
+	// block
+	blockNr := rpc.BlockNumberOrHashWithHash(headerHash, false)
+
+	// method
+	method := "getElgibleValidator"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	data, err := c.validatorSetABI.Pack(
+		method,
+	)
+	if err != nil {
+		log.Error("Unable to pack tx for getValidator", "error", err)
+		return nil, err
+	}
+
+	// call
+	msgData := (hexutil.Bytes)(data)
+	toAddress := c.config.Clique.ValidatorContract
+	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
+	result, err := c.ethAPI.Call(ctx, ethapi.TransactionArgs{
+		Gas:  &gas,
+		To:   &toAddress,
+		Data: &msgData,
+	}, blockNr, nil)
+	if err != nil {
+		panic(err)
+		// return nil, err
+	}
+
+	// type r struct {
+	// 	Result MinimalVal
+	// }
+
+	var ret0 = new([]struct {
+		Address     common.Address
+		VotingPower *big.Int
+	})
+
+	// var (
+	// 	ret0 = new([]MinimalVal)
+	// )
+	// out := &[]interface{}{
+	// 	ret0,
+	// }
+
+	log.Info("======= clique ======", "result", result)
+
+	if err := c.validatorSetABI.UnpackIntoInterface(ret0, method, result); err != nil {
+		return nil, err
+	}
+
+	valz := make([]*Validator, len(*ret0))
+	for i, a := range *ret0 {
+		valz[i] = &Validator{
+			Address:     a.Address,
+			VotingPower: a.VotingPower.Int64(),
+		}
+	}
+
+	return valz, nil
 }
