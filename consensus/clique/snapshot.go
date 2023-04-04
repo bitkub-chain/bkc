@@ -238,10 +238,10 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			return nil, err
 		}
 
+		if _, ok := snap.Signers[signer]; !ok {
+			return nil, errUnauthorizedSigner
+		}
 		if !s.config.IsPoS(new(big.Int).SetUint64(number)) {
-			if _, ok := snap.Signers[signer]; !ok {
-				return nil, errUnauthorizedSigner
-			}
 			for _, recent := range snap.Recents {
 				if recent == signer {
 					return nil, errRecentlySigned
@@ -250,6 +250,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		}
 		// } else {
 		if s.config.IsPoS(new(big.Int).SetUint64(number)) {
+
 			if number > 0 && (number+1)%span == 0 {
 				// snap.Recents = make(map[uint64]common.Address)
 				validatorBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
