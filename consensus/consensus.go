@@ -136,6 +136,9 @@ type PoW interface {
 type PoSA interface {
 	Engine
 
+	// GetSystemContracts return the list of system contracts in used.
+	GetSystemContracts(chain ChainHeaderReader, header *types.Header) (common.Address, error)
+
 	// IsSystemContract(to *common.Address) bool
 	IsSystemTransaction(tx *types.Transaction, header *types.Header) (bool, error)
 }

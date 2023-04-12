@@ -115,12 +115,12 @@ func (api *API) Propose(address common.Address, auth bool) {
 }
 
 // Propose injects a new authorization Validator contract
-func (api *API) ProposeValidatorContract(address common.Address) {
-	api.clique.lock.RLock()
-	defer api.clique.lock.RUnlock()
+// func (api *API) ProposeValidatorContract(address common.Address) {
+// 	api.clique.lock.RLock()
+// 	defer api.clique.lock.RUnlock()
 
-	api.clique.validatorContract = address
-}
+// 	api.clique.validatorContract = address
+// }
 
 // Discard drops a currently running proposal, stopping the signer from casting
 // further votes (either for or against).

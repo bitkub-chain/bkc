@@ -83,6 +83,15 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 
 	systemTxs := make([]*types.Transaction, 0)
 
+	if p.config.IsPoS(blockNumber) {
+		// TODO: to get system contracts, it should be return the list of system contracts in used.
+		// Contracts may be fetched from Registry contract or somewhere that is trustworthy.
+		_, err := posa.GetSystemContracts(p.bc, header)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+	}
+
 	for i, tx := range block.Transactions() {
 		if p.config.IsPoS(blockNumber) {
 			isSystemTx, _ := posa.IsSystemTransaction(tx, block.Header())

@@ -727,6 +727,14 @@ func (s *PublicBlockChainAPI) GetHeaderByNumber(ctx context.Context, number rpc.
 	return nil, err
 }
 
+func (s *PublicBlockChainAPI) GetHeaderTypeByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
+	header, err := s.b.HeaderByNumber(ctx, number)
+	if header != nil && err == nil {
+		return header, err
+	}
+	return nil, err
+}
+
 // GetHeaderByHash returns the requested header by hash.
 func (s *PublicBlockChainAPI) GetHeaderByHash(ctx context.Context, hash common.Hash) map[string]interface{} {
 	header, _ := s.b.HeaderByHash(ctx, hash)

