@@ -1517,9 +1517,9 @@ func encodeSigHeader(w io.Writer, header *types.Header) {
 
 func (c *Clique) getVoteAddr(header *types.Header) common.Address {
 	if c.config.IsErawan(header.Number) {
-		// if big.NewInt(0).SetBytes(header.MixDigest[(common.HashLength-common.AddressLength-validatorContractPrefix):(common.HashLength-common.AddressLength)]).Cmp(common.Big0) == 0 {
-		// 	return common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
-		// }
+		if big.NewInt(0).SetBytes(header.MixDigest[(common.HashLength-common.AddressLength):(common.HashLength-common.AddressLength)]).Cmp(common.Big0) == 0 {
+			return common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
+		}
 		return common.Address{}
 	} else {
 		return header.Coinbase
