@@ -79,8 +79,6 @@ var (
 	diffInTurn = big.NewInt(2) // Block difficulty for in-turn signatures
 	diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
 
-	validatorContractPrefix = 1
-
 	span = uint64(50)
 )
 
@@ -733,7 +731,6 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 				return errors.New("unknown validators")
 			}
 
-			// sort validator by address
 			for _, validator := range newValidators {
 				header.Extra = append(header.Extra, validator.HeaderBytes()...)
 			}
@@ -1048,6 +1045,8 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	// Sealing the genesis block is not supported
 	number := header.Number.Uint64()
 
+	// ctx, _ := context.WithCancel(context.Background())
+
 	if number == 0 {
 		return errUnknownBlock
 	}
@@ -1084,14 +1083,14 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	// Sweet, the protocol permits us to sign the block, wait for our time
 	delay := time.Until(time.Unix(int64(header.Time), 0))
 
-	log.Info("========= inturn =======", "is inturn", snap.inturn(header.Number.Uint64(), val))
-
-	sighash, err := signFn(accounts.Account{Address: val}, accounts.MimetypeClique, CliqueRLP(header))
-	if err != nil {
-		return err
-	}
-	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
-
+	// TODO: Implement the backup plan in case all validator nodes are down,
+	// We propose super validator nodes which operate by Bitkub Blockchain Technology Co., Ltd.
+	// 1. If no one from the validator list propagates a new block within (len(snap.Signer)/2+1)*blockPeriod
+	//      Example, the total validators are 10 validators, and the waiting time calculation is below..
+	//      10/2 + 1 * 5 sec = 30 sec
+	// When reaching 30 sec after the previous block was propagated, one of the super validator nodes will propagate the block instead
+	//  signer in the current span
+	// 2. All validators in the current span will be slashed by the consensus algorithm.
 	if !chain.Config().IsPoS(header.Number) {
 		if header.Difficulty.Cmp(diffNoTurn) == 0 {
 			// It's not our turn explicitly to sign, delay it a bit
@@ -1100,71 +1099,45 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 
 			log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
 		}
+	} else {
+		if header.Difficulty.Cmp(diffNoTurn) == 0 {
+			delay += time.Duration(rand.Int63n(int64(wiggleTime)))
+		}
+	}
 
-		// Wait until sealing is terminated or delay timeout.
-		log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
-		go func() {
+	// Sign all the things!
+	sighash, err := signFn(accounts.Account{Address: val}, accounts.MimetypeClique, CliqueRLP(header))
+	if err != nil {
+		return err
+	}
+	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
+	// Wait until sealing is terminated or delay timeout.
+	log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
+
+	go func() {
+		select {
+		case <-stop:
+			return
+		case <-time.After(delay):
+		}
+		if chain.Config().IsPoS(header.Number) && header.Difficulty.Cmp(diffInTurn) != 0 {
 			select {
 			case <-stop:
 				return
-			case <-time.After(delay):
-			}
-
-			select {
-			case results <- block.WithSeal(header):
-			default:
-				log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
-			}
-		}()
-	} else {
-		// TODO: Implement the backup plan in case all validator nodes are down,
-		// We propose super validator nodes which operate by Bitkub Blockchain Technology Co., Ltd.
-		// 1. If no one from the validator list propagates a new block within (len(snap.Signer)/2+1)*blockPeriod
-		//      Example, the total validators are 10 validators, and the waiting time calculation is below..
-		//      10/2 + 1 * 5 sec = 30 sec
-		// When reaching 30 sec after the previous block was propagated, one of the super validator nodes will propagate the block instead
-		//  signer in the current span
-		// 2. All validators in the current span will be slashed by the consensus algorithm.
-		if header.Difficulty.Cmp(diffInTurn) == 0 {
-			log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
-			go func() {
-				select {
-				case <-stop:
+			case <-time.After(time.Duration(1) * time.Second):
+				if val != common.HexToAddress("0x96c9f2f893adef66669b4bb4a7dfa5006c037cd3") {
+					<-stop
 					return
-				case <-time.After(delay):
 				}
-
-				select {
-				case results <- block.WithSeal(header):
-				default:
-					log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
-				}
-			}()
-		} else {
-			if val == common.HexToAddress("0x96c9f2f893adef66669b4bb4a7dfa5006c037cd3") {
-				wiggle := wiggleTime
-				delay += time.Duration(rand.Int63n(int64(wiggle)))
-
-				// log.Trace("Super node signing requested", "wiggle", common.PrettyDuration(wiggle))
-
-				// delay += time.Duration(7500 * time.Millisecond)
-
-				go func() {
-					select {
-					case <-stop:
-						return
-					case <-time.After(delay):
-					}
-
-					select {
-					case results <- block.WithSeal(header):
-					default:
-						log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
-					}
-				}()
 			}
 		}
-	}
+
+		select {
+		case results <- block.WithSeal(header):
+		default:
+			log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
+		}
+	}()
 	return nil
 }
 
@@ -1544,9 +1517,9 @@ func encodeSigHeader(w io.Writer, header *types.Header) {
 
 func (c *Clique) getVoteAddr(header *types.Header) common.Address {
 	if c.config.IsErawan(header.Number) {
-		if big.NewInt(0).SetBytes(header.MixDigest[(common.HashLength-common.AddressLength-validatorContractPrefix):(common.HashLength-common.AddressLength)]).Cmp(common.Big0) == 0 {
-			return common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
-		}
+		// if big.NewInt(0).SetBytes(header.MixDigest[(common.HashLength-common.AddressLength-validatorContractPrefix):(common.HashLength-common.AddressLength)]).Cmp(common.Big0) == 0 {
+		// 	return common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
+		// }
 		return common.Address{}
 	} else {
 		return header.Coinbase
@@ -1555,9 +1528,9 @@ func (c *Clique) getVoteAddr(header *types.Header) common.Address {
 
 func (c *Clique) getValidatorContractAddr(header *types.Header) common.Address {
 	if c.config.IsErawan(header.Number) {
-		if big.NewInt(0).SetBytes(header.MixDigest[(common.HashLength-common.AddressLength-validatorContractPrefix):(common.HashLength-common.AddressLength)]).Cmp(common.Big1) == 0 {
-			return common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
-		}
+		// if big.NewInt(0).SetBytes(header.MixDigest[(common.HashLength-common.AddressLength-validatorContractPrefix):(common.HashLength-common.AddressLength)]).Cmp(common.Big1) == 0 {
+		// 	return common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
+		// }
 		return common.Address{}
 	} else {
 		return header.Coinbase
