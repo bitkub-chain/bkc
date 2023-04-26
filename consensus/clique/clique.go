@@ -373,10 +373,6 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	checkpoint := (number % c.config.Clique.Epoch) == 0
 	if chain.Config().IsErawan(header.Number) {
 		voteAddr := c.getVoteAddr(header)
-		voteValidatorContractAddr := c.getValidatorContractAddr(header)
-		if voteValidatorContractAddr != (common.Address{}) {
-			voteAddr = voteValidatorContractAddr
-		}
 		if checkpoint && voteAddr != (common.Address{}) {
 			return errInvalidCheckpointBeneficiary
 		}
@@ -672,8 +668,12 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	number := header.Number.Uint64()
 	if !chain.Config().IsErawan(header.Number) {
 		header.Coinbase = common.Address{}
-		header.Nonce = types.BlockNonce{}
 	}
+	if chain.Config().IsPoS(header.Number) {
+		header.Coinbase = c.val
+	}
+	header.Nonce = types.BlockNonce{}
+
 	// Assemble the voting snapshot to check which votes make sense
 	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil)
 	if err != nil {
@@ -709,7 +709,6 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	}
 	// Set the correct difficulty
 	header.Difficulty = calcDifficulty(snap, c.val)
-	log.Info("======== header difficulty =======", "Difficulty", header.Difficulty.Int64())
 
 	// Ensure the extra data has all its components
 	if len(header.Extra) < extraVanity {
@@ -724,7 +723,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 			}
 		}
 	}
-	if chain.Config().IsPoS(header.Number) {
+	if number > 0 && chain.Config().IsPoS(new(big.Int).Add(header.Number, common.Big1)) {
 		if (number+1)%span == 0 {
 			newValidators, err := c.GetCurrentValidators(header.ParentHash, new(big.Int).Add(header.Number, common.Big1))
 			if err != nil {
@@ -906,7 +905,7 @@ func (c *Clique) distributeToValidator(amount *big.Int, validator common.Address
 	state *state.StateDB, header *types.Header, chain core.ChainContext,
 	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error {
 	// method
-	method := "depositReward"
+	method := "distributeReward"
 
 	// get packed data
 	data, err := c.stakingManageABI.Pack(method,
@@ -981,13 +980,9 @@ func (c *Clique) commitSpan(val common.Address, state *state.StateDB, header *ty
 		return err
 	}
 
-	// confirmBlockNr := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(parent.Number.Uint64() - 5))
-	// log.Info("====== gen validator set from ======", "block number", confirmBlockNr.BlockNumber.Int64())
+	confirmBlockNr, _ := c.ethAPI.GetHeaderTypeByNumber(ctx, rpc.BlockNumber(parent.Number.Uint64()-5))
 
-	blocks, _ := c.ethAPI.GetHeaderTypeByNumber(ctx, rpc.BlockNumber(parent.Number.Uint64()-5))
-	log.Info("====== gen validator set from ======", "block hash", blocks.Hash())
-
-	newValidators, _ := c.selectNextValidatorSet(parent, blocks)
+	newValidators, _ := c.selectNextValidatorSet(parent, confirmBlockNr)
 	tempCheck := make([]common.Address, 0)
 
 	tempValidator := make([]Validator, 0)
@@ -1084,13 +1079,9 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	delay := time.Until(time.Unix(int64(header.Time), 0))
 
 	// TODO: Implement the backup plan in case all validator nodes are down,
-	// We propose super validator nodes which operate by Bitkub Blockchain Technology Co., Ltd.
-	// 1. If no one from the validator list propagates a new block within (len(snap.Signer)/2+1)*blockPeriod
-	//      Example, the total validators are 10 validators, and the waiting time calculation is below..
-	//      10/2 + 1 * 5 sec = 30 sec
-	// When reaching 30 sec after the previous block was propagated, one of the super validator nodes will propagate the block instead
-	//  signer in the current span
-	// 2. All validators in the current span will be slashed by the consensus algorithm.
+	// We propose the official validator node which operate by Bitkub Blockchain Technology Co., Ltd.
+	// 1. The super node will be the right validator node to seal the block incase of the inturn validator node does not propagate the block in time.
+	// The timing of delay, the official will operate to sealing the block and propagate after 1 sec of delay.
 	if !chain.Config().IsPoS(header.Number) {
 		if header.Difficulty.Cmp(diffNoTurn) == 0 {
 			// It's not our turn explicitly to sign, delay it a bit
@@ -1110,6 +1101,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	if err != nil {
 		return err
 	}
+
 	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
 	// Wait until sealing is terminated or delay timeout.
 	log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
@@ -1526,17 +1518,6 @@ func (c *Clique) getVoteAddr(header *types.Header) common.Address {
 	}
 }
 
-func (c *Clique) getValidatorContractAddr(header *types.Header) common.Address {
-	if c.config.IsErawan(header.Number) {
-		// if big.NewInt(0).SetBytes(header.MixDigest[(common.HashLength-common.AddressLength-validatorContractPrefix):(common.HashLength-common.AddressLength)]).Cmp(common.Big1) == 0 {
-		// 	return common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
-		// }
-		return common.Address{}
-	} else {
-		return header.Coinbase
-	}
-}
-
 // get system message
 func (c *Clique) getSystemMessage(from, toAddress common.Address, data []byte, value *big.Int) callmsg {
 	return callmsg{
@@ -1550,8 +1531,6 @@ func (c *Clique) getSystemMessage(from, toAddress common.Address, data []byte, v
 		},
 	}
 }
-
-// func (c *Clique) setBitkubSuperNodes()
 
 // chain context
 type chainContext struct {
@@ -1597,6 +1576,7 @@ func applyMessage(
 	context := core.NewEVMBlockContext(header, chainContext, nil)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
+
 	vmenv := vm.NewEVM(context, vm.TxContext{Origin: msg.From(), GasPrice: big.NewInt(0)}, state, chainConfig, vm.Config{})
 	// Apply the transaction to the current state (included in the env)
 	ret, returnGas, err := vmenv.Call(

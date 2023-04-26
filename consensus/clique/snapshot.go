@@ -263,13 +263,6 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 						delete(snap.Recents, number-uint64(newLimit)-uint64(i))
 					}
 				}
-				// oldLimit = len(snap.Signers)
-				// newLimit = len(newVals)
-				// if newLimit < oldLimit {
-				// 	for i := 0; i < oldLimit-newLimit; i++ {
-				// 		delete(snap.RecentForkHashes, number-uint64(newLimit)-uint64(i))
-				// 	}
-				// }
 
 				log.Info("====== snapshot ======", "replace whole signers", newVals)
 				snap.Signers = newVals

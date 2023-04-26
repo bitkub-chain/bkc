@@ -286,23 +286,7 @@ func (b *EthAPIBackend) SyncProgress() ethereum.SyncProgress {
 }
 
 func (b *EthAPIBackend) SuggestGasTipCap(ctx context.Context) (*big.Int, error) {
-	// return b.gpo.SuggestTipCap(ctx)
-	header, err := b.HeaderByHash(ctx, b.eth.blockchain.CurrentHeader().Hash())
-	if err != nil {
-		return nil, err
-	}
-	if header == nil {
-		return nil, errors.New("header for hash not found")
-	}
-
-	stateDb, _ := b.eth.BlockChain().StateAt(header.Root)
-	result := stateDb.GetState(b.ChainConfig().GasPriceOracleContract(), common.BigToHash(big.NewInt(0)))
-
-	if result.Big().Cmp(big.NewInt(0)) > 0 {
-		return result.Big(), nil
-	} else {
-		return b.gpo.SuggestTipCap(ctx)
-	}
+	return b.gpo.SuggestTipCap(ctx)
 }
 
 func (b *EthAPIBackend) FeeHistory(ctx context.Context, blockCount int, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (firstBlock *big.Int, reward [][]*big.Int, baseFee []*big.Int, gasUsedRatio []float64, err error) {

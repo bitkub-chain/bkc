@@ -257,14 +257,6 @@ func (st *StateTransition) preCheck() error {
 			}
 		}
 	}
-	// add check pos transition here!!!!
-	// check gasprice from
-	recommentGas := st.state.GetState(st.evm.ChainConfig().GasPriceOracleContract(), common.BigToHash(big.NewInt(0))).Big()
-	if recommentGas.Cmp(big.NewInt(0)) > 0 {
-		if st.msg.GasPrice().Cmp(big.NewInt(0)) != 0 && st.msg.GasPrice().Cmp(recommentGas) < 0 {
-			return fmt.Errorf("Error")
-		}
-	}
 	return st.buyGas()
 }
 
