@@ -5,12 +5,7 @@ const stakingManageABI = `[
 		"inputs": [
 			{
 				"internalType": "address",
-				"name": "_registry",
-				"type": "address"
-			},
-			{
-				"internalType": "address",
-				"name": "_NFTContract",
+				"name": "_nftContract",
 				"type": "address"
 			},
 			{
@@ -20,7 +15,7 @@ const stakingManageABI = `[
 			},
 			{
 				"internalType": "address",
-				"name": "_owner",
+				"name": "_officialPool",
 				"type": "address"
 			}
 		],
@@ -55,86 +50,8 @@ const stakingManageABI = `[
 				"type": "uint256"
 			}
 		],
-		"name": "validatorDeposit",
+		"name": "ValidatorDeposit",
 		"type": "event"
-	},
-	{
-		"inputs": [],
-		"name": "NFTContract",
-		"outputs": [
-			{
-				"internalType": "contract StakingNFT",
-				"name": "",
-				"type": "address"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "NFTCounter",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "WITHDRAWAL_DELAY",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "accountStateRoot",
-		"outputs": [
-			{
-				"internalType": "bytes32",
-				"name": "",
-				"type": "bytes32"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "auctionPeriod",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "checkPointBlockInterval",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
 	},
 	{
 		"inputs": [
@@ -147,19 +64,6 @@ const stakingManageABI = `[
 		"name": "claimRewards",
 		"outputs": [],
 		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "currentEpoch",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
 		"type": "function"
 	},
 	{
@@ -240,22 +144,9 @@ const stakingManageABI = `[
 				"type": "address"
 			}
 		],
-		"name": "depositReward",
+		"name": "distributeReward",
 		"outputs": [],
 		"stateMutability": "payable",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "epoch",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
 		"type": "function"
 	},
 	{
@@ -284,19 +175,6 @@ const stakingManageABI = `[
 		"type": "function"
 	},
 	{
-		"inputs": [],
-		"name": "getRegistry",
-		"outputs": [
-			{
-				"internalType": "address",
-				"name": "",
-				"type": "address"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
 		"inputs": [
 			{
 				"internalType": "uint256",
@@ -304,7 +182,7 @@ const stakingManageABI = `[
 				"type": "uint256"
 			}
 		],
-		"name": "getValidatorContract",
+		"name": "getValidatorShareContract",
 		"outputs": [
 			{
 				"internalType": "address",
@@ -332,11 +210,82 @@ const stakingManageABI = `[
 		"inputs": [
 			{
 				"internalType": "address",
+				"name": "val",
+				"type": "address"
+			}
+		],
+		"name": "getValidatorsInfo",
+		"outputs": [
+			{
+				"components": [
+					{
+						"internalType": "uint256",
+						"name": "amount",
+						"type": "uint256"
+					},
+					{
+						"internalType": "uint256",
+						"name": "reward",
+						"type": "uint256"
+					},
+					{
+						"internalType": "address",
+						"name": "signer",
+						"type": "address"
+					},
+					{
+						"internalType": "address",
+						"name": "validatorShareContract",
+						"type": "address"
+					},
+					{
+						"internalType": "enum StakeManagerStorage.Status",
+						"name": "status",
+						"type": "uint8"
+					},
+					{
+						"internalType": "uint256",
+						"name": "commissionRate",
+						"type": "uint256"
+					},
+					{
+						"internalType": "uint256",
+						"name": "commissionAmount",
+						"type": "uint256"
+					},
+					{
+						"internalType": "uint256",
+						"name": "lastCommissionUpdate",
+						"type": "uint256"
+					},
+					{
+						"internalType": "uint256",
+						"name": "delegatorsReward",
+						"type": "uint256"
+					},
+					{
+						"internalType": "uint256",
+						"name": "delegatedAmount",
+						"type": "uint256"
+					}
+				],
+				"internalType": "struct StakeManagerStorage.Validator",
+				"name": "",
+				"type": "tuple"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
 				"name": "_validator",
 				"type": "address"
 			}
 		],
-		"name": "isValidatorAddress",
+		"name": "isSoloPoolAddress",
 		"outputs": [
 			{
 				"internalType": "bool",
@@ -350,30 +299,17 @@ const stakingManageABI = `[
 	{
 		"inputs": [
 			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
+				"internalType": "address",
+				"name": "_validator",
+				"type": "address"
 			}
 		],
-		"name": "latestSignerUpdateEpoch",
+		"name": "isValidatorAddress",
 		"outputs": [
 			{
-				"internalType": "uint256",
+				"internalType": "bool",
 				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "minDelegation",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
+				"type": "bool"
 			}
 		],
 		"stateMutability": "view",
@@ -393,11 +329,35 @@ const stakingManageABI = `[
 		"type": "function"
 	},
 	{
-		"inputs": [],
-		"name": "owner",
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"name": "minimalValidatorList",
 		"outputs": [
 			{
 				"internalType": "address",
+				"name": "signer",
+				"type": "address"
+			},
+			{
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "nftContract",
+		"outputs": [
+			{
+				"internalType": "contract StakingNFT",
 				"name": "",
 				"type": "address"
 			}
@@ -407,7 +367,7 @@ const stakingManageABI = `[
 	},
 	{
 		"inputs": [],
-		"name": "proposerBonus",
+		"name": "nftCounter",
 		"outputs": [
 			{
 				"internalType": "uint256",
@@ -419,13 +379,19 @@ const stakingManageABI = `[
 		"type": "function"
 	},
 	{
-		"inputs": [],
-		"name": "registry",
-		"outputs": [
+		"inputs": [
 			{
 				"internalType": "address",
 				"name": "",
 				"type": "address"
+			}
+		],
+		"name": "officialPool",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
 			}
 		],
 		"stateMutability": "view",
@@ -437,29 +403,11 @@ const stakingManageABI = `[
 				"internalType": "uint256",
 				"name": "validatorId",
 				"type": "uint256"
-			},
-			{
-				"internalType": "bool",
-				"name": "stakeRewards",
-				"type": "bool"
 			}
 		],
 		"name": "restake",
 		"outputs": [],
 		"stateMutability": "payable",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "rewardPerStake",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
 		"type": "function"
 	},
 	{
@@ -471,19 +419,6 @@ const stakingManageABI = `[
 			}
 		],
 		"name": "signerToValidatorId",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "signerUpdateLimit",
 		"outputs": [
 			{
 				"internalType": "uint256",
@@ -510,19 +445,6 @@ const stakingManageABI = `[
 		"name": "stake",
 		"outputs": [],
 		"stateMutability": "payable",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "token",
-		"outputs": [
-			{
-				"internalType": "contract IKKUB",
-				"name": "",
-				"type": "address"
-			}
-		],
-		"stateMutability": "view",
 		"type": "function"
 	},
 	{
@@ -570,6 +492,35 @@ const stakingManageABI = `[
 				"internalType": "uint256",
 				"name": "validatorId",
 				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			},
+			{
+				"internalType": "address",
+				"name": "delegator",
+				"type": "address"
+			}
+		],
+		"name": "transferFunds",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "validatorId",
+				"type": "uint256"
 			}
 		],
 		"name": "unstake",
@@ -598,40 +549,60 @@ const stakingManageABI = `[
 	{
 		"inputs": [
 			{
-				"internalType": "address",
-				"name": "",
-				"type": "address"
-			}
-		],
-		"name": "userFeeExit",
-		"outputs": [
-			{
 				"internalType": "uint256",
-				"name": "",
+				"name": "newMinDelegated",
 				"type": "uint256"
 			}
 		],
-		"stateMutability": "view",
+		"name": "updateMinDelegated",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bool",
+				"name": "delegation",
+				"type": "bool"
+			}
+		],
+		"name": "updateValidatorDelegation",
+		"outputs": [],
+		"stateMutability": "nonpayable",
 		"type": "function"
 	},
 	{
 		"inputs": [
 			{
 				"internalType": "uint256",
-				"name": "",
+				"name": "validatorId",
+				"type": "uint256"
+			},
+			{
+				"internalType": "int256",
+				"name": "amount",
+				"type": "int256"
+			}
+		],
+		"name": "updateValidatorState",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "validatorId",
 				"type": "uint256"
 			}
 		],
-		"name": "validatorMinimalList",
+		"name": "validatorPower",
 		"outputs": [
 			{
-				"internalType": "address",
-				"name": "signer",
-				"type": "address"
-			},
-			{
 				"internalType": "uint256",
-				"name": "amount",
+				"name": "",
 				"type": "uint256"
 			}
 		],
@@ -678,21 +649,6 @@ const stakingManageABI = `[
 				"type": "uint256"
 			},
 			{
-				"internalType": "uint256",
-				"name": "activationEpoch",
-				"type": "uint256"
-			},
-			{
-				"internalType": "uint256",
-				"name": "deactivationEpoch",
-				"type": "uint256"
-			},
-			{
-				"internalType": "uint256",
-				"name": "jailTime",
-				"type": "uint256"
-			},
-			{
 				"internalType": "address",
 				"name": "signer",
 				"type": "address"
@@ -714,6 +670,11 @@ const stakingManageABI = `[
 			},
 			{
 				"internalType": "uint256",
+				"name": "commissionAmount",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
 				"name": "lastCommissionUpdate",
 				"type": "uint256"
 			},
@@ -725,11 +686,6 @@ const stakingManageABI = `[
 			{
 				"internalType": "uint256",
 				"name": "delegatedAmount",
-				"type": "uint256"
-			},
-			{
-				"internalType": "uint256",
-				"name": "initialRewardPerStake",
 				"type": "uint256"
 			}
 		],
@@ -758,19 +714,6 @@ const stakingManageABI = `[
 			}
 		],
 		"name": "validatorStake",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "validatorThreshold",
 		"outputs": [
 			{
 				"internalType": "uint256",
@@ -817,19 +760,6 @@ const stakingManageABI = `[
 			}
 		],
 		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "withdrawalDelay",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
 		"type": "function"
 	}
 ]`
