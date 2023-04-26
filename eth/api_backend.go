@@ -296,7 +296,7 @@ func (b *EthAPIBackend) SuggestGasTipCap(ctx context.Context) (*big.Int, error) 
 	}
 
 	stateDb, _ := b.eth.BlockChain().StateAt(header.Root)
-	result := stateDb.GetState(common.HexToAddress("0x48D6C7f201C4466C877b0Ff1ad05c243D57E0769"), common.BigToHash(big.NewInt(0)))
+	result := stateDb.GetState(b.ChainConfig().GasPriceOracleContract(), common.BigToHash(big.NewInt(0)))
 
 	if result.Big().Cmp(big.NewInt(0)) > 0 {
 		return result.Big(), nil
@@ -307,6 +307,10 @@ func (b *EthAPIBackend) SuggestGasTipCap(ctx context.Context) (*big.Int, error) 
 
 func (b *EthAPIBackend) FeeHistory(ctx context.Context, blockCount int, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (firstBlock *big.Int, reward [][]*big.Int, baseFee []*big.Int, gasUsedRatio []float64, err error) {
 	return b.gpo.FeeHistory(ctx, blockCount, lastBlock, rewardPercentiles)
+}
+
+func (b *EthAPIBackend) Chain() *core.BlockChain {
+	return b.eth.BlockChain()
 }
 
 func (b *EthAPIBackend) ChainDb() ethdb.Database {

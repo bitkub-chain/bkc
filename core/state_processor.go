@@ -58,7 +58,6 @@ func NewStateProcessor(config *params.ChainConfig, bc *BlockChain, engine consen
 // transactions failed to execute due to insufficient gas it will return an error.
 func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg vm.Config) (types.Receipts, []*types.Log, uint64, error) {
 	var (
-		receipts    types.Receipts
 		usedGas     = new(uint64)
 		header      = block.Header()
 		blockHash   = block.Hash()
@@ -66,28 +65,61 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		allLogs     []*types.Log
 		gp          = new(GasPool).AddGas(block.GasLimit())
 	)
+
+	var receipts = make([]*types.Receipt, 0)
 	// Mutate the block and state according to any hard-fork specs
 	if p.config.DAOForkSupport && p.config.DAOForkBlock != nil && p.config.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(statedb)
 	}
 	blockContext := NewEVMBlockContext(header, p.bc, nil)
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)
+
+	txNum := len(block.Transactions())
 	// Iterate over and process the individual transactions
-	for i, tx := range block.Transactions() {
-		msg, err := tx.AsMessage(types.MakeSigner(p.config, header.Number), header.BaseFee)
+	posa, _ := p.engine.(consensus.PoSA)
+	commonTxs := make([]*types.Transaction, 0, txNum)
+
+	signer := types.MakeSigner(p.config, header.Number)
+
+	systemTxs := make([]*types.Transaction, 0)
+
+	if p.config.IsPoS(blockNumber) {
+		// TODO: to get system contracts, it should be return the list of system contracts in used.
+		// Contracts may be fetched from Registry contract or somewhere that is trustworthy.
+		_, err := posa.GetSystemContracts(p.bc, header)
 		if err != nil {
-			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
+			return nil, nil, 0, err
+		}
+	}
+
+	for i, tx := range block.Transactions() {
+		if p.config.IsPoS(blockNumber) {
+			isSystemTx, _ := posa.IsSystemTransaction(tx, block.Header())
+			if isSystemTx {
+				systemTxs = append(systemTxs, tx)
+				continue
+			}
+		}
+		msg, err := tx.AsMessage(signer, header.BaseFee)
+		if err != nil {
+			return nil, nil, 0, err
 		}
 		statedb.Prepare(tx.Hash(), i)
 		receipt, err := applyTransaction(msg, p.config, p.bc, nil, gp, statedb, blockNumber, blockHash, tx, usedGas, vmenv)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
+		commonTxs = append(commonTxs, tx)
 		receipts = append(receipts, receipt)
-		allLogs = append(allLogs, receipt.Logs...)
 	}
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	p.engine.Finalize(p.bc, header, statedb, block.Transactions(), block.Uncles())
+	err := p.engine.Finalize(p.bc, header, statedb, &commonTxs, block.Uncles(), &receipts, &systemTxs, usedGas)
+	if err != nil {
+		return receipts, allLogs, *usedGas, err
+	}
+	for _, receipt := range receipts {
+		allLogs = append(allLogs, receipt.Logs...)
+	}
 
 	return receipts, allLogs, *usedGas, nil
 }

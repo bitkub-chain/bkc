@@ -23,10 +23,10 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	cmath "github.com/ethereum/go-ethereum/common/math"
+	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -259,10 +259,9 @@ func (st *StateTransition) preCheck() error {
 	}
 	// add check pos transition here!!!!
 	// check gasprice from
-	recommentGas := st.state.GetState(common.HexToAddress("0x48D6C7f201C4466C877b0Ff1ad05c243D57E0769"), common.BigToHash(big.NewInt(0))).Big()
-	log.Info("============= recommentGas =============", "state_transition", recommentGas)
+	recommentGas := st.state.GetState(st.evm.ChainConfig().GasPriceOracleContract(), common.BigToHash(big.NewInt(0))).Big()
 	if recommentGas.Cmp(big.NewInt(0)) > 0 {
-		if st.msg.GasPrice().Cmp(recommentGas) < 0 {
+		if st.msg.GasPrice().Cmp(big.NewInt(0)) != 0 && st.msg.GasPrice().Cmp(recommentGas) < 0 {
 			return fmt.Errorf("Error")
 		}
 	}
@@ -342,11 +341,16 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		// After EIP-3529: refunds are capped to gasUsed / 5
 		st.refundGas(params.RefundQuotientEIP3529)
 	}
-	effectiveTip := st.gasPrice
-	if london {
-		effectiveTip = cmath.BigMin(st.gasTipCap, new(big.Int).Sub(st.gasFeeCap, st.evm.Context.BaseFee))
+
+	if st.evm.ChainConfig().IsPoS(st.evm.Context.BlockNumber) {
+		st.state.AddBalance(consensus.SystemAddress, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.gasPrice))
+	} else {
+		effectiveTip := st.gasPrice
+		if london {
+			effectiveTip = cmath.BigMin(st.gasTipCap, new(big.Int).Sub(st.gasFeeCap, st.evm.Context.BaseFee))
+		}
+		st.state.AddBalance(st.evm.Context.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), effectiveTip))
 	}
-	st.state.AddBalance(st.evm.Context.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), effectiveTip))
 
 	return &ExecutionResult{
 		UsedGas:    st.gasUsed(),

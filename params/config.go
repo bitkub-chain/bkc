@@ -374,8 +374,11 @@ func (c *EthashConfig) String() string {
 
 // CliqueConfig is the consensus engine configs for proof-of-authority based sealing.
 type CliqueConfig struct {
-	Period uint64 `json:"period"` // Number of seconds between blocks to enforce
-	Epoch  uint64 `json:"epoch"`  // Epoch length to reset votes and checkpoint
+	Period                 uint64         `json:"period"` // Number of seconds between blocks to enforce
+	Epoch                  uint64         `json:"epoch"`  // Epoch length to reset votes and checkpoint
+	ValidatorContract      common.Address `json:"validatorContract"`
+	StakingManagerContract common.Address `json:"stakingManagerContract"`
+	GasPriceOracleContract common.Address `json:"gasPriceOracleContract"`
 }
 
 // String implements the stringer interface, returning the consensus engine details.
@@ -415,6 +418,11 @@ func (c *ChainConfig) String() string {
 		c.MergeForkBlock,
 		engine,
 	)
+}
+
+// IsLondon returns whether num is either equal to the London fork block or greater.
+func (c *ChainConfig) GasPriceOracleContract() common.Address {
+	return c.Clique.GasPriceOracleContract
 }
 
 // IsHomestead returns whether num is either equal to the homestead block or greater.

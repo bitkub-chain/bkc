@@ -511,7 +511,7 @@ func (s *Ethereum) StartMining(threads int) error {
 				log.Error("Sealer account unavailable locally", "err", err)
 				return fmt.Errorf("signer missing: %v", err)
 			}
-			cli.Authorize(sa, wallet.SignData)
+			cli.Authorize(sa, wallet.SignData, wallet.SignTx)
 			s.miner.SetSealer(sa)
 		}
 		// If mining is started, we can disable the transaction rejection mechanism
