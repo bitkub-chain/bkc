@@ -61,7 +61,8 @@ const (
 	inmemorySnapshots  = 128  // Number of recent vote snapshots to keep in memory
 	inmemorySignatures = 4096 // Number of recent block signatures to keep in memory
 
-	wiggleTime = 500 * time.Millisecond // Random delay (per signer) to allow concurrent signers
+	validatorBytesLength = 40
+	wiggleTime           = 500 * time.Millisecond // Random delay (per signer) to allow concurrent signers
 )
 
 // Clique proof-of-authority protocol constants.
@@ -122,6 +123,10 @@ var (
 	// errMismatchingCheckpointSigners is returned if a checkpoint block contains a
 	// list of signers different than the one the local node calculated.
 	errMismatchingCheckpointSigners = errors.New("mismatching signer list on checkpoint block")
+
+	// errMismatchingSpanValidators is returned if a sprint block contains a
+	// list of validators different than the one the local node calculated.
+	errMismatchingSpanValidators = errors.New("mismatching validator list on span block")
 
 	// errInvalidMixDigest is returned if a block's mix digest is non-zero.
 	errInvalidMixDigest = errors.New("non-zero mix digest")
@@ -399,7 +404,7 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 		return errMissingSignature
 	}
 
-	if chain.Config().IsPoS(header.Number) {
+	if chain.Config().IsPoS(new(big.Int).SetUint64(number + 1)) {
 		checkpoint = (number+1)%span == 0
 	}
 
@@ -409,7 +414,7 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 		return errExtraSigners
 	}
 
-	if checkpoint && signersBytes%common.AddressLength != 0 {
+	if checkpoint && signersBytes%(common.AddressLength*2) != 0 {
 		return errInvalidCheckpointSigners
 	}
 
@@ -567,7 +572,8 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	for i := 0; i < len(headers)/2; i++ {
 		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
 	}
-	snap, err := snap.apply(headers)
+	// snap, err := snap.apply(headers)
+	snap, err := snap.apply(headers, chain, parents, c.config.ChainID)
 	if err != nil {
 		return nil, err
 	}
@@ -723,9 +729,9 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 			}
 		}
 	}
-	if number > 0 && chain.Config().IsPoS(new(big.Int).Add(header.Number, common.Big1)) {
+	if number > 0 && chain.Config().IsPoS(new(big.Int).SetUint64(number+1)) {
 		if (number+1)%span == 0 {
-			newValidators, err := c.GetCurrentValidators(header.ParentHash, new(big.Int).Add(header.Number, common.Big1))
+			newValidators, err := c.GetCurrentValidators(header.ParentHash, new(big.Int).SetUint64(number+1))
 			if err != nil {
 				return errors.New("unknown validators")
 			}
@@ -832,7 +838,26 @@ func (v *Validator) PowerBytes() []byte {
 // rewards given.
 func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB, txs *[]*types.Transaction,
 	uncles []*types.Header, receipts *[]*types.Receipt, systemTxs *[]*types.Transaction, usedGas *uint64) error {
+
 	if chain.Config().IsPoS(header.Number) {
+		number := header.Number.Uint64()
+		if (number+1)%span == 0 {
+			newValidators, err := c.GetCurrentValidators(header.ParentHash, new(big.Int).SetUint64(number+1))
+			if err != nil {
+				return err
+			}
+
+			validatorsBytes := make([]byte, len(newValidators)*validatorBytesLength)
+			for i, validator := range newValidators {
+				copy(validatorsBytes[i*validatorBytesLength:], validator.HeaderBytes())
+			}
+
+			extraSuffix := len(header.Extra) - extraSeal
+			if !bytes.Equal(header.Extra[extraVanity:extraSuffix], validatorsBytes) {
+				return errMismatchingSpanValidators
+			}
+		}
+
 		cx := chainContext{Chain: chain, clique: c}
 		val := header.Coinbase
 		if systemTxs != nil {
@@ -1008,7 +1033,7 @@ func (c *Clique) commitSpan(val common.Address, state *state.StateDB, header *ty
 	data, _ = c.validatorSetABI.Pack(method,
 		new(big.Int).Add(ret0, common.Big1),
 		new(big.Int).Add(ret1.EndBlock, common.Big1),
-		new(big.Int).Add(ret1.EndBlock, big.NewInt(50)),
+		new(big.Int).Add(ret1.EndBlock, big.NewInt(int64(span))),
 		validatorBytes,
 	)
 	if err != nil {
@@ -1059,8 +1084,15 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	if err != nil {
 		return err
 	}
-	if _, authorized := snap.Signers[val]; !authorized && val != common.HexToAddress("0x96c9f2f893adef66669b4bb4a7dfa5006c037cd3") {
-		return errUnauthorizedSigner
+	if !chain.Config().IsPoS(header.Number) {
+		if _, authorized := snap.Signers[val]; !authorized {
+			return errUnauthorizedSigner
+		}
+	}
+	if chain.Config().IsPoS(header.Number) {
+		if _, authorized := snap.Signers[val]; !authorized && val != common.HexToAddress("0x96c9f2f893adef66669b4bb4a7dfa5006c037cd3") {
+			return errUnauthorizedSigner
+		}
 	}
 
 	// If we're amongst the recent signers, wait for the next block
@@ -1076,7 +1108,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	}
 
 	// Sweet, the protocol permits us to sign the block, wait for our time
-	delay := time.Until(time.Unix(int64(header.Time), 0))
+	delay := time.Unix(int64(header.Time), 0).Sub(time.Now()) // nolint: gosimple
 
 	// TODO: Implement the backup plan in case all validator nodes are down,
 	// We propose the official validator node which operate by Bitkub Blockchain Technology Co., Ltd.
@@ -1173,9 +1205,6 @@ func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	}}
 }
 
-// ==========================  interaction with contract/account =========
-
-// getCurrentValidators get current validators
 func (c *Clique) GetCurrentValidators(headerHash common.Hash, blockNumber *big.Int) ([]*Validator, error) {
 	// block
 	blockNr := rpc.BlockNumberOrHashWithHash(headerHash, false)
@@ -1286,7 +1315,7 @@ func (c *Clique) selectNextValidatorSet(parent *types.Header, seedBlock *types.H
 
 	weightedRanges, totalVotingPower := createWeightedRanges(votingPower)
 
-	for i := uint64(0); i < 50; i++ {
+	for i := uint64(0); i < span; i++ {
 		/*
 			random must be in [1, totalVotingPower] to avoid situation such as
 			2 validators with 1 staking power each.
@@ -1298,7 +1327,7 @@ func (c *Clique) selectNextValidatorSet(parent *types.Header, seedBlock *types.H
 		selectedProducers = append(selectedProducers, *newValidators[index])
 	}
 
-	return selectedProducers[:50], nil
+	return selectedProducers[:span], nil
 }
 
 func binarySearch(array []uint64, search uint64) int {
@@ -1341,7 +1370,7 @@ func createWeightedRanges(weights []uint64) ([]uint64, uint64) {
 	weightedRanges := make([]uint64, len(weights))
 	totalWeight := uint64(0)
 	for i := 0; i < len(weightedRanges); i++ {
-		totalWeight += weights[i]
+		totalWeight += weights[i] / uint64(math.Pow(10, 18))
 		weightedRanges[i] = totalWeight
 	}
 	return weightedRanges, totalWeight

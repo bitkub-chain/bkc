@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
@@ -187,7 +188,7 @@ func (s *Snapshot) uncast(address common.Address, authorize bool) bool {
 
 // apply creates a new authorization snapshot by applying the given headers to
 // the original one.
-func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
+func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderReader, parents []*types.Header, chainId *big.Int) (*Snapshot, error) {
 	// Allow passing in no headers for cleaner code
 	if len(headers) == 0 {
 		return s, nil
@@ -226,10 +227,10 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			return nil, err
 		}
 
-		if _, ok := snap.Signers[signer]; !ok && signer != common.HexToAddress("0x96c9f2f893adef66669b4bb4a7dfa5006c037cd3") {
-			return nil, errUnauthorizedSigner
-		}
 		if !s.config.IsPoS(new(big.Int).SetUint64(number)) {
+			if _, ok := snap.Signers[signer]; !ok {
+				return nil, errUnauthorizedSigner
+			}
 			for _, recent := range snap.Recents {
 				if recent == signer {
 					return nil, errRecentlySigned
@@ -238,9 +239,91 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		}
 
 		if s.config.IsPoS(new(big.Int).SetUint64(number)) {
-			if number > 0 && (number+1)%span == 0 {
-				// snap.Recents = make(map[uint64]common.Address)
-				validatorBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
+			if _, ok := snap.Signers[signer]; !ok && signer != common.HexToAddress("0x96c9f2f893adef66669b4bb4a7dfa5006c037cd3") {
+				return nil, errUnauthorizedSigner
+			}
+		}
+
+		snap.Recents[number] = signer
+
+		// Tally up the new vote from the signer
+		var authorize bool
+		switch {
+		case bytes.Equal(header.Nonce[:], nonceAuthVote):
+			authorize = true
+		case bytes.Equal(header.Nonce[:], nonceDropVote):
+			authorize = false
+		default:
+			return nil, errInvalidVote
+		}
+
+		if !s.config.IsPoS(new(big.Int).SetUint64(number)) {
+			// Header authorized, discard any previous votes from the signer
+			voteAddr := s.getVoteAddr(header)
+			for i, vote := range snap.Votes {
+				if vote.Signer == signer && vote.Address == voteAddr {
+					// Uncast the vote from the cached tally
+					snap.uncast(vote.Address, vote.Authorize)
+
+					// Uncast the vote from the chronological list
+					snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
+					break // only one vote allowed
+				}
+			}
+
+			if snap.cast(voteAddr, authorize) {
+				snap.Votes = append(snap.Votes, &Vote{
+					Signer:    signer,
+					Block:     number,
+					Address:   voteAddr,
+					Authorize: authorize,
+				})
+			}
+			// If the vote passed, update the list of signers
+			if tally := snap.Tally[voteAddr]; tally.Votes > len(snap.Signers)/2 {
+				if tally.Authorize {
+					snap.Signers[voteAddr] = struct{}{}
+				} else {
+					delete(snap.Signers, voteAddr)
+
+					// Signer list shrunk, delete any leftover recent caches
+					if limit := uint64(len(snap.Signers)/2 + 1); number >= limit {
+						delete(snap.Recents, number-limit)
+					}
+					// Discard any previous votes the deauthorized signer cast
+					for i := 0; i < len(snap.Votes); i++ {
+						if snap.Votes[i].Signer == voteAddr {
+							// Uncast the vote from the cached tally
+							snap.uncast(snap.Votes[i].Address, snap.Votes[i].Authorize)
+
+							// Uncast the vote from the chronological list
+							snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
+
+							i--
+						}
+					}
+				}
+				// Discard any previous votes around the just changed account
+				for i := 0; i < len(snap.Votes); i++ {
+					if snap.Votes[i].Address == voteAddr {
+						snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
+						i--
+					}
+				}
+				delete(snap.Tally, voteAddr)
+			}
+		}
+
+		if s.config.IsPoS(new(big.Int).SetUint64(number)) {
+			if number > 0 && number%span == 0 {
+				ancient := header
+				if len(parents) > 0 {
+					ancient = parents[len(parents)-1]
+				} else {
+					ancient = chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+				}
+
+				validatorBytes := ancient.Extra[extraVanity : len(ancient.Extra)-extraSeal]
 
 				// get validators from headers and use that for new validator set
 				newValArr, _ := ParseValidators(validatorBytes)
@@ -268,73 +351,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 				snap.Signers = newVals
 			}
 		}
-		snap.Recents[number] = signer
 
-		// Header authorized, discard any previous votes from the signer
-		voteAddr := s.getVoteAddr(header)
-		for i, vote := range snap.Votes {
-			if vote.Signer == signer && vote.Address == voteAddr {
-				// Uncast the vote from the cached tally
-				snap.uncast(vote.Address, vote.Authorize)
-
-				// Uncast the vote from the chronological list
-				snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
-				break // only one vote allowed
-			}
-		}
-
-		// Tally up the new vote from the signer
-		var authorize bool
-		switch {
-		case bytes.Equal(header.Nonce[:], nonceAuthVote):
-			authorize = true
-		case bytes.Equal(header.Nonce[:], nonceDropVote):
-			authorize = false
-		default:
-			return nil, errInvalidVote
-		}
-
-		if snap.cast(voteAddr, authorize) {
-			snap.Votes = append(snap.Votes, &Vote{
-				Signer:    signer,
-				Block:     number,
-				Address:   voteAddr,
-				Authorize: authorize,
-			})
-		}
-		// If the vote passed, update the list of signers
-		if tally := snap.Tally[voteAddr]; tally.Votes > len(snap.Signers)/2 {
-			if tally.Authorize {
-				snap.Signers[voteAddr] = struct{}{}
-			} else {
-				delete(snap.Signers, voteAddr)
-
-				// Signer list shrunk, delete any leftover recent caches
-				if limit := uint64(len(snap.Signers)/2 + 1); number >= limit {
-					delete(snap.Recents, number-limit)
-				}
-				// Discard any previous votes the deauthorized signer cast
-				for i := 0; i < len(snap.Votes); i++ {
-					if snap.Votes[i].Signer == voteAddr {
-						// Uncast the vote from the cached tally
-						snap.uncast(snap.Votes[i].Address, snap.Votes[i].Authorize)
-
-						// Uncast the vote from the chronological list
-						snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
-
-						i--
-					}
-				}
-			}
-			// Discard any previous votes around the just changed account
-			for i := 0; i < len(snap.Votes); i++ {
-				if snap.Votes[i].Address == voteAddr {
-					snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
-					i--
-				}
-			}
-			delete(snap.Tally, voteAddr)
-		}
 		// If we're taking too much time (ecrecover), notify the user once a while
 		if time.Since(logged) > 8*time.Second {
 			log.Info("Reconstructing voting history", "processed", i, "total", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
@@ -380,14 +397,3 @@ func (s *Snapshot) getVoteAddr(header *types.Header) common.Address {
 		return header.Coinbase
 	}
 }
-
-// func (s *Snapshot) getValidatorContractAddr(header *types.Header) common.Address {
-// 	if s.config.IsErawan(header.Number) {
-// 		if big.NewInt(0).SetBytes(header.MixDigest[(common.HashLength-common.AddressLength-validatorContractPrefix):(common.HashLength-common.AddressLength)]).Cmp(common.Big1) == 0 {
-// 			return common.BytesToAddress(header.MixDigest[(common.HashLength - common.AddressLength):])
-// 		}
-// 		return common.Address{}
-// 	} else {
-// 		return header.Coinbase
-// 	}
-// }
