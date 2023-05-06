@@ -54,12 +54,13 @@ type Snapshot struct {
 	config   *params.ChainConfig // Consensus engine parameters to fine tune behavior
 	sigcache *lru.ARCCache       // Cache of recent block signatures to speed up ecrecover
 
-	Number  uint64                      `json:"number"`  // Block number where the snapshot was created
-	Hash    common.Hash                 `json:"hash"`    // Block hash where the snapshot was created
-	Signers map[common.Address]struct{} `json:"signers"` // Set of authorized signers at this moment
-	Recents map[uint64]common.Address   `json:"recents"` // Set of recent signers for spam protections
-	Votes   []*Vote                     `json:"votes"`   // List of votes cast in chronological order
-	Tally   map[common.Address]Tally    `json:"tally"`   // Current vote tally to avoid recalculating
+	Number     uint64                      `json:"number"`     // Block number where the snapshot was created
+	Hash       common.Hash                 `json:"hash"`       // Block hash where the snapshot was created
+	Signers    map[common.Address]struct{} `json:"signers"`    // Set of authorized signers at this moment
+	Validators []*Validator                `json:"validators"` // Validator set at this moment
+	Recents    map[uint64]common.Address   `json:"recents"`    // Set of recent signers for spam protections
+	Votes      []*Vote                     `json:"votes"`      // List of votes cast in chronological order
+	Tally      map[common.Address]Tally    `json:"tally"`      // Current vote tally to avoid recalculating
 }
 
 // signersAscending implements the sort interface to allow sorting a list of addresses
@@ -74,13 +75,14 @@ func (s signersAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 // the genesis block.
 func newSnapshot(config *params.ChainConfig, sigcache *lru.ARCCache, number uint64, hash common.Hash, signers []common.Address) *Snapshot {
 	snap := &Snapshot{
-		config:   config,
-		sigcache: sigcache,
-		Number:   number,
-		Hash:     hash,
-		Signers:  make(map[common.Address]struct{}),
-		Recents:  make(map[uint64]common.Address),
-		Tally:    make(map[common.Address]Tally),
+		config:     config,
+		sigcache:   sigcache,
+		Number:     number,
+		Hash:       hash,
+		Signers:    make(map[common.Address]struct{}),
+		Validators: make([]*Validator, 0),
+		Recents:    make(map[uint64]common.Address),
+		Tally:      make(map[common.Address]Tally),
 	}
 
 	for _, signer := range signers {
@@ -118,14 +120,15 @@ func (s *Snapshot) store(db ethdb.Database) error {
 // copy creates a deep copy of the snapshot, though not the individual votes.
 func (s *Snapshot) copy() *Snapshot {
 	cpy := &Snapshot{
-		config:   s.config,
-		sigcache: s.sigcache,
-		Number:   s.Number,
-		Hash:     s.Hash,
-		Signers:  make(map[common.Address]struct{}),
-		Recents:  make(map[uint64]common.Address),
-		Votes:    make([]*Vote, len(s.Votes)),
-		Tally:    make(map[common.Address]Tally),
+		config:     s.config,
+		sigcache:   s.sigcache,
+		Number:     s.Number,
+		Hash:       s.Hash,
+		Signers:    make(map[common.Address]struct{}),
+		Validators: s.Validators,
+		Recents:    make(map[uint64]common.Address),
+		Votes:      make([]*Vote, len(s.Votes)),
+		Tally:      make(map[common.Address]Tally),
 	}
 	for signer := range s.Signers {
 		cpy.Signers[signer] = struct{}{}
@@ -314,19 +317,12 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			}
 		}
 
-		if s.config.IsPoS(new(big.Int).SetUint64(number)) {
-			if number > 0 && number%span == 0 {
-				ancient := header
-				if len(parents) > 0 {
-					ancient = parents[len(parents)-1]
-				} else {
-					ancient = chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
-				}
-
-				validatorBytes := ancient.Extra[extraVanity : len(ancient.Extra)-extraSeal]
+		if s.config.IsPoS(new(big.Int).SetUint64(number + 1)) {
+			if number > 0 && (number+1)%span == 0 {
+				validatorBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
 
 				// get validators from headers and use that for new validator set
-				newValArr, _ := ParseValidators(validatorBytes)
+				newValArr, _ := ParseValidatorsAndPower(validatorBytes)
 				if err != nil {
 					return nil, err
 				}
@@ -335,20 +331,23 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 					return nil, err
 				}
 				newVals := make(map[common.Address]struct{}, len(newValArr))
+				validators := make([]*Validator, 0)
 				for _, val := range newValArr {
-					newVals[val] = struct{}{}
+					newVals[val.Address] = struct{}{}
+					validators = append(validators, &Validator{val.Address, val.VotingPower})
 				}
 
-				oldLimit := len(snap.Signers)/2 + 1
-				newLimit := len(newVals)/2 + 1
-				if newLimit < oldLimit {
-					for i := 0; i < oldLimit-newLimit; i++ {
-						delete(snap.Recents, number-uint64(newLimit)-uint64(i))
-					}
-				}
+				// oldLimit := len(snap.Signers)/2 + 1
+				// newLimit := len(newVals)/2 + 1
+				// if newLimit < oldLimit {
+				// 	for i := 0; i < oldLimit-newLimit; i++ {
+				// 		delete(snap.Recents, number-uint64(newLimit)-uint64(i))
+				// 	}
+				// }
 
-				log.Info("====== snapshot ======", "replace whole signers", newVals)
+				log.Info("====== snapshot ======", "replace whole signers", validators)
 				snap.Signers = newVals
+				snap.Validators = validators
 			}
 		}
 
@@ -380,11 +379,19 @@ func (s *Snapshot) signers() []common.Address {
 
 // inturn returns if a signer at a given block height is in-turn or not.
 func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
-	signers, offset := s.signers(), 0
-	for offset < len(signers) && signers[offset] != signer {
-		offset++
+	if !s.config.IsPoS(new(big.Int).SetUint64(number)) {
+		signers, offset := s.signers(), 0
+		for offset < len(signers) && signers[offset] != signer {
+			offset++
+		}
+		return (number % uint64(len(signers))) == uint64(offset)
+	} else {
+		signers, offset := s.Validators, 0
+		for offset < len(signers) && signers[offset].Address != signer {
+			offset++
+		}
+		return (number % uint64(len(signers))) == uint64(offset)
 	}
-	return (number % uint64(len(signers))) == uint64(offset)
 }
 
 func (s *Snapshot) getVoteAddr(header *types.Header) common.Address {
