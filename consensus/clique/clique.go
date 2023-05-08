@@ -1736,7 +1736,6 @@ func (c *Clique) GetEligibleValidators(headerHash common.Hash, blockNumber uint6
 	if err := c.validatorSetABI.UnpackIntoInterface(ret0, method, result); err != nil {
 		return nil, err
 	}
-	ether := uint64(math.Pow(10, 18))
 	valz := make([]*Validator, len(*ret0))
 	for i, a := range *ret0 {
 		valz[i] = &Validator{
