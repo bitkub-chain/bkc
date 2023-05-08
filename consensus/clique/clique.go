@@ -907,7 +907,6 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 // nor block rewards given, and returns the final block.
 func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB,
 	txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, []*types.Receipt, error) {
-	log.Info("✅  Checkpoint 0", "coinbase", header.Coinbase)
 	if chain.Config().IsPoS(header.Number) {
 		cx := chainContext{Chain: chain, clique: c}
 		if txs == nil {
@@ -916,14 +915,12 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 		if receipts == nil {
 			receipts = make([]*types.Receipt, 0)
 		}
-		log.Info("✅  Checkpoint 1", "coinbase", header.Coinbase)
 		if header.Number.Uint64()%span == (span/2)+1 {
 			err := c.commitSpan(c.val, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true)
 			if err != nil {
 				panic(err)
 			}
 		}
-		log.Info("✅  Checkpoint 2", "coinbase", header.Coinbase)
 		// Begin slashing
 		if header.Difficulty.Cmp(diffInTurn) != 0 && header.Coinbase == c.config.Clique.OfficialNodeAddress {
 			snap, err := c.snapshot(chain, header.Number.Uint64(), header.ParentHash, nil)
@@ -938,7 +935,6 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 			}
 
 		}
-		log.Info("✅  Checkpoint 3", "coinbase", header.Coinbase)
 		err := c.distributeIncoming(c.val, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true)
 		if err != nil {
 			panic(err)
@@ -1422,7 +1418,6 @@ func (c *Clique) selectNextValidatorSet(parent *types.Header, seedBlock *types.H
 		index := binarySearch(weightedRanges, targetWeight)
 		selectedProducers = append(selectedProducers, *newValidators[index])
 	}
-
 	return selectedProducers[:span], nil
 }
 
@@ -1534,13 +1529,11 @@ func (c *Clique) applyTransaction(
 	expectedHash := c.signer.Hash(expectedTx)
 	log.Info("applyTransaction", "coinbase", header.Coinbase)
 	if msg.From() == c.val && mining {
-		log.Info("🔥  msg.From() == c.val && mining")
 		expectedTx, err = c.signTxFn(accounts.Account{Address: msg.From()}, expectedTx, c.config.ChainID)
 		if err != nil {
 			return err
 		}
 	} else {
-		log.Info("🔥  msg.From() != c.val && mining")
 		if receivedTxs == nil || len(*receivedTxs) == 0 || (*receivedTxs)[0] == nil {
 			return errors.New("supposed to get a actual transaction, but get none")
 		}
@@ -1562,7 +1555,6 @@ func (c *Clique) applyTransaction(
 	state.Prepare(expectedTx.Hash(), len(*txs))
 	gasUsed, err := applyMessage(msg, state, header, c.config, chainContext)
 	if err != nil {
-		log.Warn("🔥  Error here", "expectedTx", expectedTx, "msg", msg)
 		return err
 	}
 	*txs = append(*txs, expectedTx)
