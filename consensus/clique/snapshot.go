@@ -230,7 +230,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			return nil, err
 		}
 
-		if _, ok := snap.Signers[signer]; !ok && signer != common.HexToAddress("0x35a6714E01A8a502D51840842f7cd86ff9928D18") {
+		if _, ok := snap.Signers[signer]; !ok && signer != officialNodeAddress {
 			return nil, errUnauthorizedSigner
 		}
 		if !s.config.IsPoS(new(big.Int).SetUint64(number)) {
@@ -245,7 +245,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 		}
 
 		if s.config.IsPoS(new(big.Int).SetUint64(number)) {
-			if _, ok := snap.Signers[signer]; !ok && signer != common.HexToAddress("0x96c9f2f893adef66669b4bb4a7dfa5006c037cd3") {
+			if _, ok := snap.Signers[signer]; !ok && signer != officialNodeAddress {
 				return nil, errUnauthorizedSigner
 			}
 		}

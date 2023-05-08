@@ -166,6 +166,7 @@ func (c *Clique) isToSystemContract(to common.Address) bool {
 	systemContracts := map[common.Address]bool{
 		c.config.Clique.ValidatorContract:    true,
 		c.config.Clique.StakeManagerContract: true,
+		c.config.Clique.SlashManagerContract: true,
 	}
 	return systemContracts[to]
 }
@@ -930,7 +931,6 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 			if err != nil {
 				panic(err)
 			}
-			// err = c.slash(inturnSigner, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true)
 			if err != nil {
 				panic(err)
 			}
@@ -950,7 +950,7 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 			if err != nil {
 				panic(err)
 			}
-			err = c.slash(inturnSigner, state, header, cx, &txs, &receipts, nil, &header.GasUsed, false)
+			err = c.slash(inturnSigner, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true)
 			if err != nil {
 				panic(err)
 			}
@@ -986,6 +986,7 @@ func (c *Clique) slash(spoiledVal common.Address, state *state.StateDB, header *
 		return err
 	}
 	// get system message
+	log.Info("🐷🐷🐷 ON SLASH", "target", spoiledVal, "from", header.Coinbase, "to", c.config.Clique.SlashManagerContract.String())
 	msg := c.getSystemMessage(header.Coinbase, common.HexToAddress(c.config.Clique.SlashManagerContract.String()), data, common.Big0)
 	// apply message
 	return c.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
@@ -1691,7 +1692,7 @@ func applyMessage(
 		msg.Value(),
 	)
 	if err != nil {
-		log.Error("apply message failed", "msg", string(ret), "err", err)
+		log.Error("apply message failed", "msg", hex.EncodeToString(ret), "err", err)
 	}
 	return msg.Gas() - returnGas, err
 }
