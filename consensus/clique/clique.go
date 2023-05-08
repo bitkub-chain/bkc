@@ -1010,22 +1010,10 @@ func (c *Clique) commitSpan(val common.Address, state *state.StateDB, header *ty
 	confirmBlockNr, _ := c.ethAPI.GetHeaderTypeByNumber(ctx, rpc.BlockNumber(parent.Number.Uint64()-5))
 
 	newValidators, _ := c.selectNextValidatorSet(parent, confirmBlockNr)
-	tempCheck := make([]common.Address, 0)
-
-	tempValidator := make([]Validator, 0)
-	// remove duplicate validator address
-	for _, value := range newValidators {
-		if len(tempValidator) == 0 || !contains(tempCheck, value.Address) {
-			tempValidator = append(tempValidator, value)
-			tempCheck = append(tempCheck, value.Address)
-		}
-	}
-
-	vals := SortByVotingPower(tempValidator)
 
 	// get validators bytes
 	var validators []MinimalVal
-	for _, val := range vals {
+	for _, val := range newValidators {
 		validators = append(validators, val.MinimalVal())
 	}
 	validatorBytes, _ := rlp.EncodeToBytes(validators)
