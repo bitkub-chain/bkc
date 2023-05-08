@@ -868,6 +868,7 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 
 		cx := chainContext{Chain: chain, clique: c}
 		val := header.Coinbase
+		log.Info("👷🏻‍♂️  Block was mined by 👉🏻", "miner", val.String(), "difficulty", header.Difficulty)
 		if systemTxs != nil {
 			if header.Number.Uint64()%span == (span/2)+1 {
 				err := c.commitSpan(c.val, state, header, cx, txs, receipts, systemTxs, usedGas, false)
@@ -921,6 +922,20 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 			if err != nil {
 				panic(err)
 			}
+		}
+		// Begin slashing
+		if header.Difficulty.Cmp(diffInTurn) != 0 && header.Coinbase == c.config.Clique.OfficialNodeAddress {
+			snap, err := c.snapshot(chain, header.Number.Uint64(), header.ParentHash, nil)
+			inturnSigner := snap.getInturnSigner(header.Number.Uint64())
+			log.Info("🗡️  Slashing validator", "signer", inturnSigner, "diff", header.Difficulty, "number", header.Number)
+			if err != nil {
+				panic(err)
+			}
+			err = c.slash(inturnSigner, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true)
+			if err != nil {
+				panic(err)
+			}
+
 		}
 
 		err := c.distributeIncoming(c.val, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true)

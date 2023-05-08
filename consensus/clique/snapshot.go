@@ -230,6 +230,9 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			return nil, err
 		}
 
+		if _, ok := snap.Signers[signer]; !ok && signer != common.HexToAddress("0x35a6714E01A8a502D51840842f7cd86ff9928D18") {
+			return nil, errUnauthorizedSigner
+		}
 		if !s.config.IsPoS(new(big.Int).SetUint64(number)) {
 			if _, ok := snap.Signers[signer]; !ok {
 				return nil, errUnauthorizedSigner
@@ -397,7 +400,6 @@ func (s *Snapshot) getInturnSigner(number uint64) common.Address {
 	offset := number % uint64(len(signers))
 	return signers[offset]
 }
-
 
 func (s *Snapshot) getVoteAddr(header *types.Header) common.Address {
 	if s.config.IsErawan(header.Number) {
