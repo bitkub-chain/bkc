@@ -391,6 +391,14 @@ func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
 	}
 }
 
+// Return inturn signer of that block number
+func (s *Snapshot) getInturnSigner(number uint64) common.Address {
+	signers := s.signers()
+	offset := number % uint64(len(signers))
+	return signers[offset]
+}
+
+
 func (s *Snapshot) getVoteAddr(header *types.Header) common.Address {
 	if s.config.IsErawan(header.Number) {
 		if big.NewInt(0).SetBytes(header.MixDigest[(common.HashLength-common.AddressLength):(common.HashLength-common.AddressLength)]).Cmp(common.Big0) == 0 {
