@@ -57,7 +57,7 @@ type Snapshot struct {
 	Number     uint64                      `json:"number"`     // Block number where the snapshot was created
 	Hash       common.Hash                 `json:"hash"`       // Block hash where the snapshot was created
 	Signers    map[common.Address]struct{} `json:"signers"`    // Set of authorized signers at this moment
-	Validators []*Validator                `json:"validators"` // Validator set at this moment
+	Validators []common.Address            `json:"validators"` // Validator set at this moment
 	Recents    map[uint64]common.Address   `json:"recents"`    // Set of recent signers for spam protections
 	Votes      []*Vote                     `json:"votes"`      // List of votes cast in chronological order
 	Tally      map[common.Address]Tally    `json:"tally"`      // Current vote tally to avoid recalculating
@@ -80,7 +80,7 @@ func newSnapshot(config *params.ChainConfig, sigcache *lru.ARCCache, number uint
 		Number:     number,
 		Hash:       hash,
 		Signers:    make(map[common.Address]struct{}),
-		Validators: make([]*Validator, 0),
+		Validators: make([]common.Address, 0),
 		Recents:    make(map[uint64]common.Address),
 		Tally:      make(map[common.Address]Tally),
 	}
@@ -331,10 +331,10 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 					return nil, err
 				}
 				newVals := make(map[common.Address]struct{}, len(newValArr))
-				validators := make([]*Validator, 0)
+				validators := make([]common.Address, 0)
 				for _, val := range newValArr {
 					newVals[val.Address] = struct{}{}
-					validators = append(validators, &Validator{val.Address, val.VotingPower})
+					validators = append(validators, val.Address)
 				}
 
 				// oldLimit := len(snap.Signers)/2 + 1
@@ -345,7 +345,6 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 				// 	}
 				// }
 
-				log.Info("====== snapshot ======", "replace whole signers", validators)
 				snap.Signers = newVals
 				snap.Validators = validators
 			}
@@ -386,11 +385,9 @@ func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
 		}
 		return (number % uint64(len(signers))) == uint64(offset)
 	} else {
-		signers, offset := s.Validators, 0
-		for offset < len(signers) && signers[offset].Address != signer {
-			offset++
-		}
-		return (number % uint64(len(signers))) == uint64(offset)
+		signers := s.Validators
+		offset := number % uint64(len(signers))
+		return signers[offset] == signer
 	}
 }
 
