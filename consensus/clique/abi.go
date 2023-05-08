@@ -820,7 +820,7 @@ const validatorSetABI = `
 	},
 	{
 		"inputs": [],
-		"name": "getElgibleValidator",
+		"name": "getEligibleValidators",
 		"outputs": [
 			{
 				"components": [

@@ -650,6 +650,7 @@ func (c *Clique) verifySealPoS(snap *Snapshot, header *types.Header, parents []*
 	if err != nil {
 		return err
 	}
+
 	if _, ok := snap.Signers[signer]; !ok && signer != common.HexToAddress("0x96c9f2f893adef66669b4bb4a7dfa5006c037cd3") {
 		return errUnauthorizedSigner
 	}
@@ -685,6 +686,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	if err != nil {
 		return err
 	}
+
 	if number%c.config.Clique.Epoch != 0 {
 		c.lock.RLock()
 
@@ -813,8 +815,8 @@ func contains(elems []common.Address, v common.Address) bool {
 }
 
 func SortByVotingPower(a []Validator) []Validator {
-	sort.Slice(a, func(i, j int) bool {
-		return a[i].VotingPower-a[j].VotingPower > 0
+	sort.SliceStable(a, func(i, j int) bool {
+		return a[i].VotingPower > a[j].VotingPower
 	})
 	return a
 }
@@ -1305,7 +1307,7 @@ func (c *Clique) selectNextValidatorSet(parent *types.Header, seedBlock *types.H
 	seed := int64(binary.BigEndian.Uint64(seedBytes[:]))
 	rand.Seed(seed)
 
-	newValidators, _ := c.GetElgibleValidators(parent.Hash(), parent.Number.Uint64())
+	newValidators, _ := c.GetEligibleValidators(parent.Hash(), parent.Number.Uint64())
 
 	// weighted range from validators' voting power
 	votingPower := make([]uint64, len(newValidators))
@@ -1370,7 +1372,7 @@ func createWeightedRanges(weights []uint64) ([]uint64, uint64) {
 	weightedRanges := make([]uint64, len(weights))
 	totalWeight := uint64(0)
 	for i := 0; i < len(weightedRanges); i++ {
-		totalWeight += weights[i] / uint64(math.Pow(10, 18))
+		totalWeight += weights[i]
 		weightedRanges[i] = totalWeight
 	}
 	return weightedRanges, totalWeight
@@ -1622,12 +1624,12 @@ func applyMessage(
 }
 
 // GetCurrentValidators get current validators
-func (c *Clique) GetElgibleValidators(headerHash common.Hash, blockNumber uint64) ([]*Validator, error) {
+func (c *Clique) GetEligibleValidators(headerHash common.Hash, blockNumber uint64) ([]*Validator, error) {
 	// block
 	blockNr := rpc.BlockNumberOrHashWithHash(headerHash, false)
 
 	// method
-	method := "getElgibleValidator"
+	method := "getEligibleValidators"
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1665,8 +1667,9 @@ func (c *Clique) GetElgibleValidators(headerHash common.Hash, blockNumber uint64
 	valz := make([]*Validator, len(*ret0))
 	for i, a := range *ret0 {
 		valz[i] = &Validator{
-			Address:     a.Address,
-			VotingPower: a.VotingPower.Int64(),
+			Address: a.Address,
+			// VotingPower: a.VotingPower.Int64(),
+			VotingPower: new(big.Int).Div(a.VotingPower, new(big.Int).SetInt64(int64(math.Pow(10, 18)))).Int64(),
 		}
 	}
 
