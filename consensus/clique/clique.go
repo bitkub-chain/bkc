@@ -741,6 +741,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		if (number+1)%span == 0 {
 			newValidators, err := c.GetCurrentValidators(header.ParentHash, new(big.Int).SetUint64(number+1))
 			if err != nil {
+				log.Error("GetCurrentValidators", "err", err.Error())
 				return errors.New("unknown validators")
 			}
 
@@ -923,13 +924,13 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 		}
 		// Begin slashing
 		if header.Difficulty.Cmp(diffInTurn) != 0 && header.Coinbase == c.config.Clique.OfficialNodeAddress {
-			snap, err := c.snapshot(chain, header.Number.Uint64(), header.ParentHash, nil)
+			snap, err := c.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil)
 			inturnSigner := snap.getInturnSigner(header.Number.Uint64())
-			log.Info("🗡️  Slashing validator", "signer", inturnSigner, "diff", header.Difficulty, "number", header.Number)
+			log.Info("🗡️  Slashing validator (FAA)", "signer", inturnSigner, "diff", header.Difficulty, "number", header.Number)
 			if err != nil {
 				panic(err)
 			}
-			err = c.slash(inturnSigner, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true)
+			// err = c.slash(inturnSigner, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true)
 			if err != nil {
 				panic(err)
 			}
@@ -962,8 +963,10 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 	return types.NewBlock(header, txs, nil, receipts, trie.NewStackTrie(nil)), receipts, nil
 }
 
+// slash spoiled validators
 func (c *Clique) slash(spoiledVal common.Address, state *state.StateDB, header *types.Header, chain core.ChainContext,
 	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error {
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	currentSpan, err := c.getCurrentSpan(ctx, header)
@@ -1052,46 +1055,27 @@ func (c *Clique) distributeToValidator(amount *big.Int, validator common.Address
 func (c *Clique) commitSpan(val common.Address, state *state.StateDB, header *types.Header, chain core.ChainContext,
 	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error {
 
+	// This blockNr var only be used on `spans` call
 	blockNr := rpc.BlockNumberOrHashWithHash(header.ParentHash, false)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
 
-	method := "currentSpanNumber"
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // cancel when we are finished consuming integers
+	ret0, err := c.getCurrentSpan(ctx, header)
 
-	data, err := c.validatorSetABI.Pack(method)
-	if err != nil {
-		log.Error("Unable to pack tx for deposit", "error", err)
-		return err
-	}
-
-	msgData := (hexutil.Bytes)(data)
-	toAddress := c.config.Clique.ValidatorContract
-	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
-	result, _ := c.ethAPI.Call(ctx, ethapi.TransactionArgs{
-		Gas:  &gas,
-		To:   &toAddress,
-		Data: &msgData,
-	}, blockNr, nil)
-
-	var ret0 *big.Int
-	log.Info("currentSpanNumber result unpack", "&ret0", &ret0, "method", method, "result", result)
-	if err := c.validatorSetABI.UnpackIntoInterface(&ret0, method, result); err != nil {
-		return err
-	}
-
-	method = "spans"
-	data, err = c.validatorSetABI.Pack(
+	method := "spans"
+	data, err := c.validatorSetABI.Pack(
 		method,
 		ret0)
 	if err != nil {
 		log.Error("Unable to pack tx for deposit", "error", err)
 		return err
 	}
-	msgData = (hexutil.Bytes)(data)
-	toAddress = c.config.Clique.ValidatorContract
-	gas = (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
-	result, _ = c.ethAPI.Call(ctx, ethapi.TransactionArgs{
+	msgData := (hexutil.Bytes)(data)
+	toAddress := c.config.Clique.ValidatorContract
+	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
+	result, _ := c.ethAPI.Call(ctx, ethapi.TransactionArgs{
 		Gas:  &gas,
 		To:   &toAddress,
 		Data: &msgData,
