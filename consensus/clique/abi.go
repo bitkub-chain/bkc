@@ -1,6 +1,6 @@
 package clique
 
-const stakingManageABI = `[
+const stakeManageABI = `[
 	{
 		"inputs": [
 			{

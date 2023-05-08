@@ -163,8 +163,8 @@ type SignerTxFn func(accounts.Account, *types.Transaction, *big.Int) (*types.Tra
 
 func (c *Clique) isToSystemContract(to common.Address) bool {
 	systemContracts := map[common.Address]bool{
-		c.config.Clique.ValidatorContract:      true,
-		c.config.Clique.StakingManagerContract: true,
+		c.config.Clique.ValidatorContract:    true,
+		c.config.Clique.StakeManagerContract: true,
 	}
 	return systemContracts[to]
 }
@@ -214,9 +214,10 @@ type Clique struct {
 	// SuperNodes map[common.Address]struct{} `json:"supernodes"` // Set of authorized bitkub super nodes
 	lock sync.RWMutex // Protects the signer fields
 
-	ethAPI           *ethapi.PublicBlockChainAPI
-	stakingManageABI abi.ABI
-	validatorSetABI  abi.ABI
+	ethAPI          *ethapi.PublicBlockChainAPI
+	stakeManageABI  abi.ABI
+	slashManageABI  abi.ABI
+	validatorSetABI abi.ABI
 
 	// The fields below are for testing only
 	fakeDiff bool // Skip difficulty verifications
@@ -264,21 +265,26 @@ func New(
 	if err != nil {
 		panic(err)
 	}
-	sABI, err := abi.JSON(strings.NewReader(stakingManageABI))
+	sABI, err := abi.JSON(strings.NewReader(stakeManageABI))
+	if err != nil {
+		panic(err)
+	}
+	slABI, err := abi.JSON(strings.NewReader(slashABI))
 	if err != nil {
 		panic(err)
 	}
 
 	return &Clique{
-		config:           &conf,
-		db:               db,
-		recents:          recents,
-		signatures:       signatures,
-		ethAPI:           ethAPI,
-		validatorSetABI:  vABI,
-		stakingManageABI: sABI,
-		proposals:        make(map[common.Address]bool),
-		signer:           types.NewEIP155Signer(config.ChainID),
+		config:          &conf,
+		db:              db,
+		recents:         recents,
+		signatures:      signatures,
+		ethAPI:          ethAPI,
+		validatorSetABI: vABI,
+		stakeManageABI:  sABI,
+		slashManageABI:  slABI,
+		proposals: make(map[common.Address]bool),
+		signer:    types.NewEIP155Signer(config.ChainID),
 	}
 }
 
@@ -650,8 +656,7 @@ func (c *Clique) verifySealPoS(snap *Snapshot, header *types.Header, parents []*
 	if err != nil {
 		return err
 	}
-
-	if _, ok := snap.Signers[signer]; !ok && signer != common.HexToAddress("0x96c9f2f893adef66669b4bb4a7dfa5006c037cd3") {
+	if _, ok := snap.Signers[signer]; !ok && signer != c.config.Clique.OfficialNodeAddress {
 		return errUnauthorizedSigner
 	}
 
@@ -935,7 +940,7 @@ func (c *Clique) distributeToValidator(amount *big.Int, validator common.Address
 	method := "distributeReward"
 
 	// get packed data
-	data, err := c.stakingManageABI.Pack(method,
+	data, err := c.stakeManageABI.Pack(method,
 		validator,
 	)
 	if err != nil {
@@ -943,7 +948,7 @@ func (c *Clique) distributeToValidator(amount *big.Int, validator common.Address
 		return err
 	}
 	// get system message
-	msg := c.getSystemMessage(header.Coinbase, c.config.Clique.StakingManagerContract, data, amount)
+	msg := c.getSystemMessage(header.Coinbase, c.config.Clique.StakeManagerContract, data, amount)
 	// apply message
 	return c.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
 }
@@ -1080,7 +1085,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		}
 	}
 	if chain.Config().IsPoS(header.Number) {
-		if _, authorized := snap.Signers[val]; !authorized && val != common.HexToAddress("0x96c9f2f893adef66669b4bb4a7dfa5006c037cd3") {
+		if _, authorized := snap.Signers[val]; !authorized && val != c.config.Clique.OfficialNodeAddress {
 			return errUnauthorizedSigner
 		}
 	}
@@ -1139,7 +1144,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 			case <-stop:
 				return
 			case <-time.After(time.Duration(1) * time.Second):
-				if val != common.HexToAddress("0x96c9f2f893adef66669b4bb4a7dfa5006c037cd3") {
+				if val != c.config.Clique.OfficialNodeAddress {
 					<-stop
 					return
 				}
@@ -1156,7 +1161,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 }
 
 // CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
-// that a new block should have:``
+// that a new block should have:“
 // * DIFF_NOTURN(2) if BLOCK_NUMBER % SIGNER_COUNT != SIGNER_INDEX
 // * DIFF_INTURN(1) if BLOCK_NUMBER % SIGNER_COUNT == SIGNER_INDEX
 func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, time uint64, parent *types.Header) *big.Int {
