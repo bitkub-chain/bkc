@@ -230,6 +230,9 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			return nil, err
 		}
 
+		if _, ok := snap.Signers[signer]; !ok && signer != s.config.Clique.OfficialNodeAddress {
+			return nil, errUnauthorizedSigner
+		}
 		if !s.config.IsPoS(new(big.Int).SetUint64(number)) {
 			if _, ok := snap.Signers[signer]; !ok {
 				return nil, errUnauthorizedSigner
@@ -242,7 +245,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 		}
 
 		if s.config.IsPoS(new(big.Int).SetUint64(number)) {
-			if _, ok := snap.Signers[signer]; !ok && signer != common.HexToAddress("0x96c9f2f893adef66669b4bb4a7dfa5006c037cd3") {
+			if _, ok := snap.Signers[signer]; !ok && signer != s.config.Clique.OfficialNodeAddress {
 				return nil, errUnauthorizedSigner
 			}
 		}
@@ -389,6 +392,13 @@ func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
 		offset := number % uint64(len(signers))
 		return signers[offset] == signer
 	}
+}
+
+// Return inturn signer of that block number
+func (s *Snapshot) getInturnSigner(number uint64) common.Address {
+	signers := s.signers()
+	offset := number % uint64(len(signers))
+	return signers[offset]
 }
 
 func (s *Snapshot) getVoteAddr(header *types.Header) common.Address {
