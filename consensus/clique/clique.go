@@ -80,8 +80,7 @@ var (
 	diffInTurn = big.NewInt(2) // Block difficulty for in-turn signatures
 	diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
 
-	span                = uint64(50)
-	officialNodeAddress = common.HexToAddress("0x35a6714E01A8a502D51840842f7cd86ff9928D18")
+	span = uint64(50)
 )
 
 // Various error messages to mark blocks invalid. These should be private to
@@ -658,7 +657,7 @@ func (c *Clique) verifySealPoS(snap *Snapshot, header *types.Header, parents []*
 	if err != nil {
 		return err
 	}
-	if _, ok := snap.Signers[signer]; !ok && signer != officialNodeAddress {
+	if _, ok := snap.Signers[signer]; !ok && signer != c.config.Clique.OfficialNodeAddress {
 		return errUnauthorizedSigner
 	}
 
@@ -885,7 +884,7 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 		}
 
 		// Begin slashing state update
-		if header.Difficulty.Cmp(diffInTurn) != 0 && header.Coinbase == officialNodeAddress {
+		if header.Difficulty.Cmp(diffInTurn) != 0 && header.Coinbase == c.config.Clique.OfficialNodeAddress {
 			log.Info("ℹ️  Commited by official node", "validator", header.Coinbase, "diff", header.Difficulty, "number", header.Number)
 			snap, err := c.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil)
 			inturnSigner := snap.getInturnSigner(header.Number.Uint64())
@@ -942,7 +941,7 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 		}
 
 		// Begin slashing state update
-		if header.Difficulty.Cmp(diffInTurn) != 0 && header.Coinbase == officialNodeAddress && c.config.PoSBlock.Cmp(header.Number) != 0 {
+		if header.Difficulty.Cmp(diffInTurn) != 0 && header.Coinbase == c.config.Clique.OfficialNodeAddress && c.config.PoSBlock.Cmp(header.Number) != 0 {
 			log.Info("ℹ️  Commited by official node", "validator", header.Coinbase, "diff", header.Difficulty, "number", header.Number)
 			snap, err := c.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil)
 			inturnSigner := snap.getInturnSigner(header.Number.Uint64())
@@ -1169,7 +1168,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		}
 	}
 	if chain.Config().IsPoS(header.Number) {
-		if _, authorized := snap.Signers[val]; !authorized && val != officialNodeAddress {
+		if _, authorized := snap.Signers[val]; !authorized && val != c.config.Clique.OfficialNodeAddress {
 			return errUnauthorizedSigner
 		}
 	}
@@ -1228,7 +1227,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 			case <-stop:
 				return
 			case <-time.After(time.Duration(1) * time.Second):
-				if val != officialNodeAddress {
+				if val != c.config.Clique.OfficialNodeAddress {
 					<-stop
 					return
 				}

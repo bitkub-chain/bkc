@@ -230,7 +230,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			return nil, err
 		}
 
-		if _, ok := snap.Signers[signer]; !ok && signer != officialNodeAddress {
+		if _, ok := snap.Signers[signer]; !ok && signer != s.config.Clique.OfficialNodeAddress {
 			return nil, errUnauthorizedSigner
 		}
 		if !s.config.IsPoS(new(big.Int).SetUint64(number)) {
@@ -245,7 +245,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 		}
 
 		if s.config.IsPoS(new(big.Int).SetUint64(number)) {
-			if _, ok := snap.Signers[signer]; !ok && signer != officialNodeAddress {
+			if _, ok := snap.Signers[signer]; !ok && signer != s.config.Clique.OfficialNodeAddress {
 				return nil, errUnauthorizedSigner
 			}
 		}
