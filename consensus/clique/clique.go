@@ -970,6 +970,10 @@ func (c *Clique) slash(spoiledVal common.Address, state *state.StateDB, header *
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	currentSpan, err := c.getCurrentSpan(ctx, header)
+	number := header.Number.Uint64()
+	if number%span == 0 {
+		currentSpan = new(big.Int).Add(currentSpan, common.Big1)
+	}
 	if err != nil {
 		return err
 	}
@@ -986,7 +990,7 @@ func (c *Clique) slash(spoiledVal common.Address, state *state.StateDB, header *
 		return err
 	}
 	// get system message
-	log.Info("🐷🐷🐷 ON SLASH", "target", spoiledVal, "from", header.Coinbase, "to", c.config.Clique.SlashManagerContract.String())
+	log.Info("🐷🐷🐷 ON SLASH", "target", spoiledVal, "from", header.Coinbase, "to", c.config.Clique.SlashManagerContract.String(), "number", header.Number, "diff", header.Difficulty, "span", currentSpan.String())
 	msg := c.getSystemMessage(header.Coinbase, common.HexToAddress(c.config.Clique.SlashManagerContract.String()), data, common.Big0)
 	// apply message
 	return c.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
@@ -1456,49 +1460,6 @@ func ToBytes32(x []byte) [32]byte {
 	var y [32]byte
 	copy(y[:], x)
 	return y
-}
-
-func (c *Clique) getValidators(blockHash common.Hash, blockNumber *big.Int) ([]common.Address, error) {
-	// block
-	blockNr := rpc.BlockNumberOrHashWithHash(blockHash, false)
-
-	// method
-	method := "getElgibleValidator"
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // cancel when we are finished consuming integers
-
-	data, err := c.validatorSetABI.Pack(method)
-	if err != nil {
-		log.Error("Unable to pack tx for getValidators", "error", err)
-		return nil, err
-	}
-	// call
-	msgData := (hexutil.Bytes)(data)
-	toAddress := c.config.Clique.ValidatorContract
-	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
-	result, err := c.ethAPI.Call(ctx, ethapi.TransactionArgs{
-		Gas:  &gas,
-		To:   &toAddress,
-		Data: &msgData,
-	}, blockNr, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var (
-		ret0 = new([]common.Address)
-	)
-	out := ret0
-
-	if err := c.validatorSetABI.UnpackIntoInterface(out, method, result); err != nil {
-		return nil, err
-	}
-
-	valz := make([]common.Address, len(*ret0))
-	copy(valz, *ret0)
-
-	return valz, nil
 }
 
 func (c *Clique) applyTransaction(
