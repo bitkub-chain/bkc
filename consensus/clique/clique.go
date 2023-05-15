@@ -1205,6 +1205,9 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 			log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
 		}
 	} else {
+		if header.Difficulty.Cmp(diffNoTurn) == 0 {
+			delay += time.Duration(rand.Int63n(int64(wiggleTime)))
+		}
 		ctx := context.Background()
 		inturnSigner := snap.getInturnSigner(header.Number.Uint64())
 		currentSpan, err := c.getCurrentSpan(ctx, header)
