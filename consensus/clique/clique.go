@@ -883,6 +883,11 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 			}
 		}
 
+		// noturn is only permitted from official node
+		if header.Difficulty.Cmp(diffInTurn) != 0 && header.Coinbase != c.config.Clique.OfficialNodeAddress {
+			return errUnauthorizedSigner
+		}
+
 		// Begin slashing state update
 		if header.Difficulty.Cmp(diffInTurn) != 0 && header.Coinbase == c.config.Clique.OfficialNodeAddress {
 			log.Info("ℹ️  Commited by official node", "validator", header.Coinbase, "diff", header.Difficulty, "number", header.Number)
