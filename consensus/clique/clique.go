@@ -850,6 +850,11 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 
 	if chain.Config().IsPoS(header.Number) {
 		number := header.Number.Uint64()
+		blockSinger, _ := ecrecover(header, c.signatures)
+		if header.Difficulty.Cmp(diffNoTurn) == 0 && blockSinger != c.config.Clique.OfficialNodeAddress {
+			return errInvalidDifficulty
+		}
+
 		if (number+1)%span == 0 {
 			newValidators, err := c.GetCurrentValidators(header.ParentHash, new(big.Int).SetUint64(number+1))
 			if err != nil {
@@ -1081,7 +1086,7 @@ func (c *Clique) commitSpan(val common.Address, state *state.StateDB, header *ty
 		method,
 		ret0)
 	if err != nil {
-		log.Error("Unable to pack tx for deposit", "error", err)
+		log.Error("Unable to pack tx for get span", "error", err)
 		return err
 	}
 	msgData := (hexutil.Bytes)(data)
@@ -1123,7 +1128,7 @@ func (c *Clique) commitSpan(val common.Address, state *state.StateDB, header *ty
 		validatorBytes,
 	)
 	if err != nil {
-		log.Error("Unable to pack tx for deposit", "error", err)
+		log.Error("Unable to pack tx for commitSpan", "error", err)
 		return err
 	}
 	// get system message
@@ -1445,21 +1450,20 @@ func (c *Clique) selectNextValidatorSet(parent *types.Header, seedBlock *types.H
 	selectedProducers := make([]Validator, 0)
 
 	// seed hash will be from parent hash to seed block hash
-	seedBytes := ToBytes32(parent.Hash().Bytes()[:32])
+	seedBytes := ToBytes32(seedBlock.Hash().Bytes()[:32])
 	seed := int64(binary.BigEndian.Uint64(seedBytes[:]))
-	rand.Seed(seed)
+
+	r := rand.New(rand.NewSource(seed))
 
 	newValidators, _ := c.GetEligibleValidators(parent.Hash(), parent.Number.Uint64())
 
 	// weighted range from validators' voting power
 	votingPower := make([]uint64, len(newValidators))
 	for idx, validator := range newValidators {
-		log.Info("e validator", "address", validator.Address.String(), "pow", validator.VotingPower)
 		votingPower[idx] = uint64(validator.VotingPower)
 	}
 
 	weightedRanges, totalVotingPower := createWeightedRanges(votingPower)
-	log.Info("yay", "weightedRanges", weightedRanges, "totalVotingPower", totalVotingPower)
 
 	for i := uint64(0); i < span; i++ {
 		/*
@@ -1468,7 +1472,7 @@ func (c *Clique) selectNextValidatorSet(parent *types.Header, seedBlock *types.H
 			Weighted range will look like (1, 2)
 			Rolling inclusive will have a range of 0 - 2, making validator with staking power 1 chance of selection = 66%
 		*/
-		targetWeight := randomRangeInclusive(1, totalVotingPower)
+		targetWeight := randomRangeInclusive(1, totalVotingPower, r)
 		index := binarySearch(weightedRanges, targetWeight)
 		selectedProducers = append(selectedProducers, *newValidators[index])
 	}
@@ -1493,18 +1497,18 @@ func binarySearch(array []uint64, search uint64) int {
 }
 
 // randomRangeInclusive produces unbiased pseudo random in the range [min, max]. Uses rand.Uint64() and can be seeded beforehand.
-func randomRangeInclusive(min uint64, max uint64) uint64 {
+func randomRangeInclusive(min uint64, max uint64, r *rand.Rand) uint64 {
 	if max <= min {
 		return max
 	}
 
 	rangeLength := max - min + 1
 	maxAllowedValue := math.MaxUint64 - math.MaxUint64%rangeLength - 1
-	randomValue := rand.Uint64()
+	randomValue := r.Uint64()
 
 	// reject anything that is beyond the reminder to avoid bias
 	for randomValue >= maxAllowedValue {
-		randomValue = rand.Uint64()
+		randomValue = r.Uint64()
 	}
 
 	return min + randomValue%rangeLength
@@ -1538,7 +1542,6 @@ func (c *Clique) applyTransaction(
 	nonce := state.GetNonce(msg.From())
 	expectedTx := types.NewTransaction(nonce, *msg.To(), msg.Value(), msg.Gas(), msg.GasPrice(), msg.Data())
 	expectedHash := c.signer.Hash(expectedTx)
-	log.Info("applyTransaction", "coinbase", header.Coinbase)
 	if msg.From() == c.val && mining {
 		expectedTx, err = c.signTxFn(accounts.Account{Address: msg.From()}, expectedTx, c.config.ChainID)
 		if err != nil {
