@@ -140,5 +140,5 @@ type PoSA interface {
 	GetSystemContracts(chain ChainHeaderReader, header *types.Header) (common.Address, error)
 
 	// IsSystemContract(to *common.Address) bool
-	IsSystemTransaction(tx *types.Transaction, header *types.Header) (bool, error)
+	IsSystemTransaction(tx *types.Transaction, header *types.Header, chain ChainHeaderReader) (bool, error)
 }

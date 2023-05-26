@@ -32,6 +32,12 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 )
 
+type POSAddress struct {
+	StakeManager common.Address `json:"stakeManager"`
+	SlashManager common.Address `json:"slashManager"`
+	OfficialNode common.Address `json:"officialNode"`
+}
+
 // Vote represents a single vote that an authorized signer made to modify the
 // list of authorizations.
 type Vote struct {
@@ -61,6 +67,7 @@ type Snapshot struct {
 	Recents    map[uint64]common.Address   `json:"recents"`    // Set of recent signers for spam protections
 	Votes      []*Vote                     `json:"votes"`      // List of votes cast in chronological order
 	Tally      map[common.Address]Tally    `json:"tally"`      // Current vote tally to avoid recalculating
+	POSAddress POSAddress                  `json:"posAddress"` // PoS consensus addresses storage
 }
 
 // signersAscending implements the sort interface to allow sorting a list of addresses
@@ -126,6 +133,7 @@ func (s *Snapshot) copy() *Snapshot {
 		Hash:       s.Hash,
 		Signers:    make(map[common.Address]struct{}),
 		Validators: s.Validators,
+		POSAddress: s.POSAddress,
 		Recents:    make(map[uint64]common.Address),
 		Votes:      make([]*Vote, len(s.Votes)),
 		Tally:      make(map[common.Address]Tally),
@@ -230,7 +238,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			return nil, err
 		}
 
-		if _, ok := snap.Signers[signer]; !ok && signer != s.config.Clique.OfficialNodeAddress {
+		if _, ok := snap.Signers[signer]; !ok && signer != snap.POSAddress.OfficialNode {
 			return nil, errUnauthorizedSigner
 		}
 		if !s.config.IsPoS(new(big.Int).SetUint64(number)) {
@@ -245,7 +253,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 		}
 
 		if s.config.IsPoS(new(big.Int).SetUint64(number)) {
-			if _, ok := snap.Signers[signer]; !ok && signer != s.config.Clique.OfficialNodeAddress {
+			if _, ok := snap.Signers[signer]; !ok && signer != snap.POSAddress.OfficialNode {
 				return nil, errUnauthorizedSigner
 			}
 		}
@@ -322,13 +330,23 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 
 		if s.config.IsPoS(new(big.Int).SetUint64(number + 1)) {
 			if number > 0 && (number+1)%span == 0 {
-				validatorBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
-
-				// get validators from headers and use that for new validator set
-				newValArr, _ := ParseValidatorsAndPower(validatorBytes)
-				if err != nil {
-					return nil, err
+				posBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
+				if len(posBytes) < contractBytesLength {
+					log.Error("posBytes error", "bytes", posBytes)
+					// panic("invalid consensus bytes")
 				}
+				validatorBytes := posBytes[:len(posBytes)-contractBytesLength]
+				addressBytes := posBytes[len(posBytes)-contractBytesLength:]
+				contracts, err := ParseAddressBytes(addressBytes)
+				if err != nil {
+					log.Error("posBytes error", "posBytes", posBytes, "validatorBytes", validatorBytes, "addressBytes", addressBytes)
+					// panic(err)
+				}
+				if len(contracts) < totalPosContracts {
+					log.Error("some PoS contracts are missing", "require", totalPosContracts, "have", len(contracts), "contracts", contracts)
+				}
+				// get validators from headers and use that for new validator set
+				newValArr, err := ParseValidatorsAndPower(validatorBytes)
 
 				if err != nil {
 					return nil, err
@@ -350,9 +368,11 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 
 				snap.Signers = newVals
 				snap.Validators = validators
+				snap.POSAddress.StakeManager = *contracts[0]
+				snap.POSAddress.SlashManager = *contracts[1]
+				snap.POSAddress.OfficialNode = *contracts[2]
 			}
 		}
-
 		// If we're taking too much time (ecrecover), notify the user once a while
 		if time.Since(logged) > 8*time.Second {
 			log.Info("Reconstructing voting history", "processed", i, "total", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
@@ -365,7 +385,6 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 	}
 	snap.Number += uint64(len(headers))
 	snap.Hash = headers[len(headers)-1].Hash()
-
 	return snap, nil
 }
 
