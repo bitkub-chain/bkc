@@ -94,7 +94,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 
 	for i, tx := range block.Transactions() {
 		if p.config.IsPoS(blockNumber) {
-			isSystemTx, _ := posa.IsSystemTransaction(tx, block.Header())
+			isSystemTx, _ := posa.IsSystemTransaction(tx, block.Header(), p.bc)
 			if isSystemTx {
 				systemTxs = append(systemTxs, tx)
 				continue
