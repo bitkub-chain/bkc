@@ -1246,10 +1246,14 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		case <-time.After(delay):
 		}
 		if chain.Config().IsPoS(header.Number) && (header.Difficulty.Cmp(diffInTurn) != 0 || slashed) {
+			defaultWaitTime := time.Duration(1)
+			if slashed {
+				defaultWaitTime = time.Duration(0)
+			}
 			select {
 			case <-stop:
 				return
-			case <-time.After(time.Duration(1) * time.Second):
+			case <-time.After(defaultWaitTime * time.Second):
 				if val != c.config.Clique.OfficialNodeAddress {
 					<-stop
 					return
