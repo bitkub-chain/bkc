@@ -883,6 +883,11 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 			}
 		}
 
+		// noturn is only permitted from official node
+		if header.Difficulty.Cmp(diffInTurn) != 0 && header.Coinbase != c.config.Clique.OfficialNodeAddress {
+			return errUnauthorizedSigner
+		}
+
 		// Begin slashing state update
 		if header.Difficulty.Cmp(diffInTurn) != 0 && header.Coinbase == c.config.Clique.OfficialNodeAddress {
 			log.Info("ℹ️  Commited by official node", "validator", header.Coinbase, "diff", header.Difficulty, "number", header.Number)
@@ -969,12 +974,12 @@ func (c *Clique) slash(spoiledVal common.Address, state *state.StateDB, header *
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	currentSpan, err := c.getCurrentSpan(ctx, header)
+	if err != nil {
+		return err
+	}
 	number := header.Number.Uint64()
 	if number%span == 0 {
 		currentSpan = new(big.Int).Add(currentSpan, common.Big1)
-	}
-	if err != nil {
-		return err
 	}
 	// method
 	method := "slash"
@@ -1067,6 +1072,9 @@ func (c *Clique) commitSpan(val common.Address, state *state.StateDB, header *ty
 	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
 
 	ret0, err := c.getCurrentSpan(ctx, header)
+	if err != nil {
+		panic(err)
+	}
 
 	method := "spans"
 	data, err := c.validatorSetABI.Pack(
@@ -1187,7 +1195,8 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 
 	// Sweet, the protocol permits us to sign the block, wait for our time
 	delay := time.Unix(int64(header.Time), 0).Sub(time.Now()) // nolint: gosimple
-
+	// Only be used in PoS
+	slashed := false
 	// TODO: Implement the backup plan in case all validator nodes are down,
 	// We propose the official validator node which operate by Bitkub Blockchain Technology Co., Ltd.
 	// 1. The super node will be the right validator node to seal the block incase of the inturn validator node does not propagate the block in time.
@@ -1203,6 +1212,20 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	} else {
 		if header.Difficulty.Cmp(diffNoTurn) == 0 {
 			delay += time.Duration(rand.Int63n(int64(wiggleTime)))
+		}
+		ctx := context.Background()
+		inturnSigner := snap.getInturnSigner(header.Number.Uint64())
+		currentSpan, err := c.getCurrentSpan(ctx, header)
+		if err != nil {
+			return err
+		}
+		number := header.Number.Uint64()
+		if number%span == 0 {
+			currentSpan = new(big.Int).Add(currentSpan, common.Big1)
+		}
+		slashed, err = c.isSlashed(inturnSigner, currentSpan, header)
+		if err != nil {
+			panic(err)
 		}
 	}
 
@@ -1222,11 +1245,15 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 			return
 		case <-time.After(delay):
 		}
-		if chain.Config().IsPoS(header.Number) && header.Difficulty.Cmp(diffInTurn) != 0 {
+		if chain.Config().IsPoS(header.Number) && (header.Difficulty.Cmp(diffInTurn) != 0 || slashed) {
+			defaultWaitTime := time.Duration(1)
+			if slashed {
+				defaultWaitTime = time.Duration(0)
+			}
 			select {
 			case <-stop:
 				return
-			case <-time.After(time.Duration(1) * time.Second):
+			case <-time.After(defaultWaitTime * time.Second):
 				if val != c.config.Clique.OfficialNodeAddress {
 					<-stop
 					return
@@ -1281,6 +1308,45 @@ func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 		Service:   &API{chain: chain, clique: c},
 		Public:    false,
 	}}
+}
+
+func (c *Clique) isSlashed(signer common.Address, span *big.Int, header *types.Header) (bool, error) {
+	blockNr := rpc.BlockNumberOrHashWithHash(header.ParentHash, false)
+
+	method := "isSignerSlashed"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // cancel when we are finished consuming integers
+
+	data, err := c.slashManagerABI.Pack(
+		method,
+		signer,
+		span,
+	)
+
+	if err != nil {
+		log.Error("Unable to pack tx for isSignerSlashed", "error", err)
+		return false, err
+	}
+
+	// call
+	msgData := (hexutil.Bytes)(data)
+	toAddress := c.config.Clique.SlashManagerContract
+	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
+	result, err := c.ethAPI.Call(ctx, ethapi.TransactionArgs{
+		Gas:  &gas,
+		To:   &toAddress,
+		Data: &msgData,
+	}, blockNr, nil)
+	if err != nil {
+		panic(err)
+		// return nil, err
+	}
+	var out bool
+	if err := c.slashManagerABI.UnpackIntoInterface(&out, method, result); err != nil {
+		return false, err
+	}
+	return out, nil
 }
 
 func (c *Clique) GetCurrentValidators(headerHash common.Hash, blockNumber *big.Int) ([]*Validator, error) {
