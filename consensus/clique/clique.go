@@ -848,15 +848,6 @@ func ParseValidators(validatorsBytes []byte) ([]common.Address, error) {
 	return result, nil
 }
 
-func contains(elems []common.Address, v common.Address) bool {
-	for _, s := range elems {
-		if v == s {
-			return true
-		}
-	}
-	return false
-}
-
 func SortByVotingPower(a []Validator) []Validator {
 	sort.SliceStable(a, func(i, j int) bool {
 		return a[i].VotingPower > a[j].VotingPower
@@ -1096,44 +1087,9 @@ func (c *Clique) distributeToValidator(amount *big.Int, validator common.Address
 func (c *Clique) commitSpan(val common.Address, state *state.StateDB, header *types.Header, chain core.ChainContext,
 	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error {
 
-	// This blockNr var only be used on `spans` call
-	blockNr := rpc.BlockNumberOrHashWithHash(header.ParentHash, false)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
-
-	ret0, err := c.getCurrentSpan(ctx, header)
-	if err != nil {
-		log.Error("unable to get current span", "error", err)
-	}
-
-	method := "spans"
-	data, err := c.validatorSetABI.Pack(
-		method,
-		ret0)
-	if err != nil {
-		log.Error("Unable to pack tx for get span", "error", err)
-		return err
-	}
-	msgData := (hexutil.Bytes)(data)
-	toAddress := c.config.Clique.ValidatorContract
-	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
-	result, _ := c.ethAPI.Call(ctx, ethapi.TransactionArgs{
-		Gas:  &gas,
-		To:   &toAddress,
-		Data: &msgData,
-	}, blockNr, nil)
-
-	ret1 := new(struct {
-		Number     *big.Int
-		StartBlock *big.Int
-		EndBlock   *big.Int
-	})
-
-	if err := c.validatorSetABI.UnpackIntoInterface(ret1, method, result); err != nil {
-		return err
-	}
 
 	confirmBlockNr, _ := c.ethAPI.GetHeaderTypeByNumber(ctx, rpc.BlockNumber(parent.Number.Uint64()-5))
 
@@ -1146,16 +1102,13 @@ func (c *Clique) commitSpan(val common.Address, state *state.StateDB, header *ty
 	}
 	validatorBytes, _ := rlp.EncodeToBytes(validators)
 
-	method = "commitSpan"
+	method := "commitSpan"
 	// get packed data
-	data, _ = c.validatorSetABI.Pack(method,
-		new(big.Int).Add(ret0, common.Big1),
-		new(big.Int).Add(ret1.EndBlock, common.Big1),
-		new(big.Int).Add(ret1.EndBlock, big.NewInt(int64(span))),
+	data, err := c.validatorSetABI.Pack(method,
 		validatorBytes,
 	)
 	if err != nil {
-		log.Error("Unable to pack tx for commitSpan", "error", err)
+		log.Error("Unable to pack tx for commitspan", "error", err)
 		return err
 	}
 	// get system message

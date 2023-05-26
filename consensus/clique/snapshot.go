@@ -373,7 +373,6 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 				snap.POSAddress.OfficialNode = *contracts[2]
 			}
 		}
-		log.Info("snap", "POSAddress", snap.POSAddress)
 		// If we're taking too much time (ecrecover), notify the user once a while
 		if time.Since(logged) > 8*time.Second {
 			log.Info("Reconstructing voting history", "processed", i, "total", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
