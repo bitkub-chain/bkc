@@ -161,6 +161,9 @@ var (
 
 	// Fail to get the given snapshot
 	errGetSnapshotFailed = errors.New("fail to get the snapshot")
+
+	// Invalid span
+	errInvalidSpan = errors.New("invalid span")
 )
 
 // SignerFn hashes and signs the data to be signed by a backing account.
@@ -909,7 +912,7 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 			if header.Number.Uint64()%span == (span/2)+1 {
 				err := c.commitSpan(c.val, state, header, cx, txs, receipts, systemTxs, usedGas, false)
 				if err != nil {
-					panic(err)
+					return errInvalidSpan
 				}
 			}
 			err := c.distributeIncoming(val, state, header, cx, txs, receipts, systemTxs, usedGas, false, snap)

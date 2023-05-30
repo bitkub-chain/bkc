@@ -415,7 +415,7 @@ func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
 
 // Return inturn signer of that block number
 func (s *Snapshot) getInturnSigner(number uint64) common.Address {
-	signers := s.signers()
+	signers := s.Validators
 	offset := number % uint64(len(signers))
 	return signers[offset]
 }
