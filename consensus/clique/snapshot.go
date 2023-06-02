@@ -228,7 +228,6 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			snap.Tally = make(map[common.Address]Tally)
 		}
 		// Delete the oldest signer from the recent list to allow it signing again
-		// limit = 2
 		if limit := uint64(len(snap.Signers)/2 + 1); number >= limit {
 			delete(snap.Recents, number-limit)
 		}
@@ -358,13 +357,13 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 					validators = append(validators, val.Address)
 				}
 
-				// oldLimit := len(snap.Signers)/2 + 1
-				// newLimit := len(newVals)/2 + 1
-				// if newLimit < oldLimit {
-				// 	for i := 0; i < oldLimit-newLimit; i++ {
-				// 		delete(snap.Recents, number-uint64(newLimit)-uint64(i))
-				// 	}
-				// }
+				oldLimit := len(snap.Signers)/2 + 1
+				newLimit := len(newVals)/2 + 1
+				if newLimit < oldLimit {
+					for i := 0; i < oldLimit-newLimit; i++ {
+						delete(snap.Recents, number-uint64(newLimit)-uint64(i))
+					}
+				}
 
 				snap.Signers = newVals
 				snap.Validators = validators
