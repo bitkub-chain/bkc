@@ -425,20 +425,22 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 		return errMissingSignature
 	}
 
-	if chain.Config().IsPoS(new(big.Int).SetUint64(number + 1)) {
-		checkpoint = (number+1)%span == 0
-	}
-
 	// Ensure that the extra-data contains a signer list on checkpoint, but none otherwise
 	signersBytes := len(header.Extra) - extraVanity - extraSeal
-	if checkpoint {
+
+	signerBytesLength := common.AddressLength
+	if chain.Config().IsPoS(new(big.Int).SetUint64(number + 1)) {
+		checkpoint = (number+1)%span == 0
+		signerBytesLength = common.AddressLength * 2
+
 		signersBytes -= contractBytesLength
 	}
+
 	if !checkpoint && signersBytes != 0 {
 		return errExtraSigners
 	}
 
-	if checkpoint && signersBytes%(common.AddressLength*2) != 0 {
+	if checkpoint && signersBytes%signerBytesLength != 0 {
 		return errInvalidCheckpointSigners
 	}
 
