@@ -431,9 +431,10 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	signerBytesLength := common.AddressLength
 	if chain.Config().IsPoS(new(big.Int).SetUint64(number + 1)) {
 		checkpoint = (number+1)%span == 0
-		signerBytesLength = common.AddressLength * 2
-
-		signersBytes -= contractBytesLength
+		if checkpoint {
+			signerBytesLength = common.AddressLength * 2
+			signersBytes -= contractBytesLength
+		}
 	}
 
 	if !checkpoint && signersBytes != 0 {
@@ -557,7 +558,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		// at a checkpoint block without a parent (light client CHT), or we have piled
 		// up more headers than allowed to be reorged (chain reinit from a freezer),
 		// consider the checkpoint trusted and snapshot it.
-		if number == 0 || (number%c.config.Clique.Epoch == 0 && (len(headers) > params.FullImmutabilityThreshold || chain.GetHeaderByNumber(number-1) == nil) || number == chain.Config().PoSBlock.Uint64()) {
+		if number == 0 || (number%c.config.Clique.Epoch == 0 && (len(headers) > params.FullImmutabilityThreshold || chain.GetHeaderByNumber(number-1) == nil)) {
 			checkpoint := chain.GetHeaderByNumber(number)
 			if checkpoint != nil {
 				hash := checkpoint.Hash()
@@ -606,7 +607,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	c.recents.Add(snap.Hash, snap)
 
 	// If we've generated a new checkpoint snapshot, save to disk
-	if snap.Number%checkpointInterval == 0 && len(headers) > 0 || number == chain.Config().PoSBlock.Uint64() {
+	if (snap.Number%checkpointInterval == 0 || number == chain.Config().PoSBlock.Uint64()) && len(headers) > 0 {
 		if err = snap.store(c.db); err != nil {
 			return nil, err
 		}
