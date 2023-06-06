@@ -18,6 +18,8 @@ package core
 
 import (
 	"crypto/ecdsa"
+	"errors"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -52,6 +54,7 @@ func TestStateProcessorErrors(t *testing.T) {
 			PetersburgBlock:     big.NewInt(0),
 			IstanbulBlock:       big.NewInt(0),
 			ErawanBlock:         big.NewInt(0),
+			PoSBlock:            nil,
 			MuirGlacierBlock:    big.NewInt(0),
 			BerlinBlock:         big.NewInt(0),
 			LondonBlock:         big.NewInt(0),
@@ -225,6 +228,7 @@ func TestStateProcessorErrors(t *testing.T) {
 					PetersburgBlock:     big.NewInt(0),
 					IstanbulBlock:       big.NewInt(0),
 					ErawanBlock:         big.NewInt(0),
+					PoSBlock:            nil,
 					MuirGlacierBlock:    big.NewInt(0),
 				},
 				Alloc: GenesisAlloc{
@@ -240,21 +244,22 @@ func TestStateProcessorErrors(t *testing.T) {
 		defer blockchain.Stop()
 		for i, tt := range []struct {
 			txs  []*types.Transaction
-			want string
+			want error
 		}{
 			{ // ErrTxTypeNotSupported
 				txs: []*types.Transaction{
 					mkDynamicTx(0, common.Address{}, params.TxGas-1000, big.NewInt(0), big.NewInt(0)),
 				},
-				want: "could not apply tx 0 [0x88626ac0d53cb65308f2416103c62bb1f18b805573d4f96a3640bbbfff13c14f]: transaction type not supported",
+				want: types.ErrTxTypeNotSupported,
 			},
 		} {
+			fmt.Printf("======= genesis ======== %v", gspec.Config)
 			block := GenerateBadBlock(genesis, ethash.NewFaker(), tt.txs, gspec.Config)
 			_, err := blockchain.InsertChain(types.Blocks{block})
 			if err == nil {
 				t.Fatal("block imported without errors")
 			}
-			if have, want := err.Error(), tt.want; have != want {
+			if have, want := err, tt.want; !errors.Is(have, want) {
 				t.Errorf("test %d:\nhave \"%v\"\nwant \"%v\"\n", i, have, want)
 			}
 		}

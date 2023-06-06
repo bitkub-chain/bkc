@@ -138,10 +138,11 @@ func testAccessList(t *testing.T, client *rpc.Client) {
 	ec := New(client)
 	// Test transfer
 	msg := ethereum.CallMsg{
-		From:     testAddr,
-		To:       &common.Address{},
-		Gas:      21000,
-		GasPrice: big.NewInt(765625000),
+		From: testAddr,
+		To:   &common.Address{},
+		Gas:  21000,
+		// GasPrice: big.NewInt(765625000),
+		GasPrice: big.NewInt(params.InitialBaseFee),
 		Value:    big.NewInt(1),
 	}
 	al, gas, vmErr, err := ec.CreateAccessList(context.Background(), msg)

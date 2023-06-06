@@ -607,7 +607,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	c.recents.Add(snap.Hash, snap)
 
 	// If we've generated a new checkpoint snapshot, save to disk
-	if (snap.Number%checkpointInterval == 0 || number == chain.Config().PoSBlock.Uint64()) && len(headers) > 0 {
+	if td := chain.Config().PoSBlock; (snap.Number%checkpointInterval == 0 || (td != nil && number == chain.Config().PoSBlock.Uint64())) && len(headers) > 0 {
 		if err = snap.store(c.db); err != nil {
 			return nil, err
 		}

@@ -334,7 +334,7 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		st.refundGas(params.RefundQuotientEIP3529)
 	}
 
-	if st.evm.ChainConfig().IsPoS(st.evm.Context.BlockNumber) {
+	if st.evm.ChainConfig().PoSBlock != nil && st.evm.ChainConfig().IsPoS(st.evm.Context.BlockNumber) {
 		st.state.AddBalance(consensus.SystemAddress, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.gasPrice))
 	} else {
 		effectiveTip := st.gasPrice
