@@ -885,8 +885,8 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 			panic(err)
 		}
 		number := header.Number.Uint64()
-		blockSinger, _ := ecrecover(header, c.signatures)
-		if isNoturnDifficulty(header.Difficulty) && blockSinger != snap.SystemContracts.OfficialNode {
+		blockSigner, _ := ecrecover(header, c.signatures)
+		if isNoturnDifficulty(header.Difficulty) && blockSigner != snap.SystemContracts.OfficialNode {
 			return errInvalidDifficulty
 		}
 
