@@ -237,12 +237,12 @@ type Clique struct {
 // Validator represets Volatile state for each Validator
 type Validator struct {
 	Address     common.Address `json:"signer"`
-	VotingPower int64          `json:"power"`
+	VotingPower uint64         `json:"power"`
 	// ProposerPriority int64          `json:"accum"`
 }
 
 // NewValidator creates new validator
-func NewValidator(address common.Address, votingPower int64) *Validator {
+func NewValidator(address common.Address, votingPower uint64) *Validator {
 	return &Validator{
 		Address:     address,
 		VotingPower: votingPower,
@@ -396,7 +396,7 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 		return consensus.ErrFutureBlock
 	}
 	// Checkpoint blocks need to enforce zero beneficiary
-	checkpoint := (number % c.config.Clique.Epoch) == 0
+	checkpoint := isOnEpochStart(c.config, header.Number)
 	if chain.Config().IsErawan(header.Number) {
 		voteAddr := c.getVoteAddr(header)
 		if checkpoint && voteAddr != (common.Address{}) {
@@ -514,7 +514,7 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 		return err
 	}
 	// If the block is a checkpoint block, verify the signer list
-	if number%c.config.Clique.Epoch == 0 {
+	if isOnEpochStart(c.config, header.Number) {
 		signers := make([]byte, len(snap.Signers)*common.AddressLength)
 		for i, val := range snap.signers() {
 			copy(signers[i*common.AddressLength:], val[:])
@@ -558,7 +558,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		// at a checkpoint block without a parent (light client CHT), or we have piled
 		// up more headers than allowed to be reorged (chain reinit from a freezer),
 		// consider the checkpoint trusted and snapshot it.
-		if number == 0 || (number%c.config.Clique.Epoch == 0 && (len(headers) > params.FullImmutabilityThreshold || chain.GetHeaderByNumber(number-1) == nil)) {
+		if number == 0 || isOnEpochStart(c.config, new(big.Int).SetUint64(number)) && (len(headers) > params.FullImmutabilityThreshold || chain.GetHeaderByNumber(number-1) == nil) {
 			checkpoint := chain.GetHeaderByNumber(number)
 			if checkpoint != nil {
 				hash := checkpoint.Hash()
@@ -714,7 +714,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		return err
 	}
 
-	if number%c.config.Clique.Epoch != 0 {
+	if !isOnEpochStart(c.config, header.Number) {
 		c.lock.RLock()
 
 		// Gather all the proposals that make sense voting on
@@ -751,7 +751,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	}
 	header.Extra = header.Extra[:extraVanity]
 
-	if number%c.config.Clique.Epoch == 0 {
+	if isOnEpochStart(c.config, header.Number) {
 		if !isPoS(c.config, header.Number) {
 			for _, signer := range snap.signers() {
 				header.Extra = append(header.Extra, signer[:]...)
@@ -829,7 +829,7 @@ func ParseValidatorsAndPower(validatorsBytes []byte) ([]*Validator, error) {
 		copy(address, validatorsBytes[i:i+20])
 		copy(power, validatorsBytes[i+20:i+40])
 
-		result[i/40] = NewValidator(common.BytesToAddress(address), big.NewInt(0).SetBytes(power).Int64())
+		result[i/40] = NewValidator(common.BytesToAddress(address), big.NewInt(0).SetBytes(power).Uint64())
 	}
 	log.Info("validators from extra", "result", result)
 	return result, nil
@@ -870,7 +870,7 @@ func (v *Validator) HeaderBytes() []byte {
 
 // PowerBytes return power bytes
 func (v *Validator) PowerBytes() []byte {
-	powerBytes := big.NewInt(0).SetInt64(v.VotingPower).Bytes()
+	powerBytes := big.NewInt(0).SetUint64(v.VotingPower).Bytes()
 	result := make([]byte, 20)
 	copy(result[20-len(powerBytes):], powerBytes)
 	return result
@@ -1405,7 +1405,7 @@ func (c *Clique) GetCurrentValidators(headerHash common.Hash, blockNumber *big.I
 	for i, a := range *ret0 {
 		valz[i] = &Validator{
 			Address:     a,
-			VotingPower: (*ret1)[i].Int64(),
+			VotingPower: (*ret1)[i].Uint64(),
 		}
 	}
 	ca := &SystemContracts{
@@ -1779,11 +1779,16 @@ func (c *Clique) GetEligibleValidators(headerHash common.Hash, blockNumber uint6
 		valz[i] = &Validator{
 			Address: a.Address,
 			// VotingPower: a.VotingPower.Int64(),
-			VotingPower: new(big.Int).Div(a.VotingPower, new(big.Int).SetInt64(int64(math.Pow(10, 18)))).Int64(),
+			VotingPower: new(big.Int).Div(a.VotingPower, new(big.Int).SetInt64(int64(math.Pow(10, 18)))).Uint64(),
 		}
 	}
 
 	return valz, nil
+}
+
+func isOnEpochStart(config *params.ChainConfig, number *big.Int) bool {
+	n := number.Uint64()
+	return n%config.Clique.Epoch == 0
 }
 
 // Check whether the given block is in the proof-of-stake period.
