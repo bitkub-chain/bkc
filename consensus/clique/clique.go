@@ -449,7 +449,7 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	}
 	// Ensure that the block's difficulty is meaningful (may not be correct at this point)
 	if number > 0 {
-		if !isPoS(c.config, header.Number) {
+		if !c.config.IsPoS(header.Number) {
 			if header.Difficulty == nil || (!isInturnDifficulty(header.Difficulty) && !isNoturnDifficulty(header.Difficulty)) {
 				return errInvalidDifficulty
 			}
@@ -518,14 +518,14 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 			copy(signers[i*common.AddressLength:], val[:])
 		}
 		extraSuffix := len(header.Extra) - extraSeal
-		if !isPoS(c.config, header.Number) {
+		if !c.config.IsPoS(header.Number) {
 			if !bytes.Equal(header.Extra[extraVanity:extraSuffix], signers) {
 				return errMismatchingCheckpointSigners
 			}
 		}
 	}
 	// All basic checks passed, verify the seal and return
-	if isPoS(c.config, header.Number) {
+	if c.config.IsPoS(header.Number) {
 		return c.verifySealPoS(snap, header, parents)
 	}
 	return c.verifySeal(snap, header, parents)
@@ -701,7 +701,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	if !chain.Config().IsErawan(header.Number) {
 		header.Coinbase = common.Address{}
 	}
-	if isPoS(c.config, header.Number) {
+	if c.config.IsPoS(header.Number) {
 		header.Coinbase = c.val
 	}
 	header.Nonce = types.BlockNonce{}
@@ -750,7 +750,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	header.Extra = header.Extra[:extraVanity]
 
 	if isOnEpochStart(c.config, header.Number) {
-		if !isPoS(c.config, header.Number) {
+		if !c.config.IsPoS(header.Number) {
 			for _, signer := range snap.signers() {
 				header.Extra = append(header.Extra, signer[:]...)
 			}
@@ -879,7 +879,7 @@ func (v *Validator) PowerBytes() []byte {
 func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB, txs *[]*types.Transaction,
 	uncles []*types.Header, receipts *[]*types.Receipt, systemTxs *[]*types.Transaction, usedGas *uint64) error {
 
-	if isPoS(c.config, header.Number) {
+	if c.config.IsPoS(header.Number) {
 		snap, err := c.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil)
 		if err != nil {
 			panic(err)
@@ -951,7 +951,7 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 // nor block rewards given, and returns the final block.
 func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB,
 	txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, []*types.Receipt, error) {
-	if isPoS(c.config, header.Number) {
+	if c.config.IsPoS(header.Number) {
 		snap, err := c.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil)
 		if err != nil {
 			panic(err)
@@ -1169,19 +1169,19 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	if err != nil {
 		return err
 	}
-	if !isPoS(c.config, header.Number) {
+	if !c.config.IsPoS(header.Number) {
 		if _, authorized := snap.Signers[val]; !authorized {
 			return errUnauthorizedSigner
 		}
 	}
-	if isPoS(c.config, header.Number) {
+	if c.config.IsPoS(header.Number) {
 		if _, authorized := snap.Signers[val]; !authorized && val != snap.SystemContracts.OfficialNode {
 			return errUnauthorizedSigner
 		}
 	}
 
 	// If we're amongst the recent signers, wait for the next block
-	if !isPoS(c.config, header.Number) {
+	if !c.config.IsPoS(header.Number) {
 		for seen, recent := range snap.Recents {
 			if recent == val {
 				// Signer is among recents, only wait if the current block doesn't shift it out
@@ -1200,7 +1200,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	// We propose the official validator node which operate by Bitkub Blockchain Technology Co., Ltd.
 	// 1. The super node will be the right validator node to seal the block incase of the inturn validator node does not propagate the block in time.
 	// The timing of delay, the official will operate to sealing the block and propagate after 1 sec of delay.
-	if !isPoS(c.config, header.Number) {
+	if !c.config.IsPoS(header.Number) {
 		if isNoturnDifficulty(header.Difficulty) {
 			// It's not our turn explicitly to sign, delay it a bit
 			wiggle := time.Duration(len(snap.Signers)/2+1) * wiggleTime
@@ -1243,7 +1243,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 			return
 		case <-time.After(delay):
 		}
-		if isPoS(c.config, header.Number) && (!isInturnDifficulty(header.Difficulty) || slashed) {
+		if c.config.IsPoS(header.Number) && (!isInturnDifficulty(header.Difficulty) || slashed) {
 			defaultWaitTime := time.Duration(2)
 			if slashed {
 				defaultWaitTime = time.Duration(0)
@@ -1790,14 +1790,9 @@ func isOnEpochStart(config *params.ChainConfig, number *big.Int) bool {
 	return n%config.Clique.Epoch == 0
 }
 
-// Check whether the given block is in the proof-of-stake period.
-func isPoS(config *params.ChainConfig, number *big.Int) bool {
-	return config.IsPoS(number)
-}
-
 // Check whether the next block of the given block is in proof-of-stake period.
 func isNextBlockPoS(config *params.ChainConfig, number *big.Int) bool {
-	return isPoS(config, new(big.Int).Add(number, common.Big1))
+	return config.IsPoS(new(big.Int).Add(number, common.Big1))
 }
 
 // Check whether the given block is the commitment block (mid-span).
@@ -1811,14 +1806,14 @@ func isSpanCommitmentBlock(config *params.ChainConfig, number *big.Int) bool {
 	midSpan = midSpan.Add(midSpan, common.Big1)
 
 	// is pos && number % span = span / 2 + 1
-	return isPoS(config, number) && mod.Cmp(midSpan) == 0
+	return config.IsPoS(number) && mod.Cmp(midSpan) == 0
 }
 
 // Check whether the given block is the first block of the span.
 func isSpanFirstBlock(config *params.ChainConfig, number *big.Int) bool {
 	bigSpan := new(big.Int).SetUint64(config.Clique.Span)
 	mod := new(big.Int).Mod(number, bigSpan)
-	return isPoS(config, number) && mod.Cmp(common.Big0) == 0
+	return config.IsPoS(number) && mod.Cmp(common.Big0) == 0
 }
 
 // Check whether the next block of the given block is the first block of the span.
@@ -1828,7 +1823,7 @@ func isNextBlockASpanFirstBlock(config *params.ChainConfig, number *big.Int) boo
 	// (number + 1) % span
 	mod := new(big.Int).Mod(nextBlock, bigSpan)
 	// is pos && (number + 1) % span == 0
-	return isPoS(config, nextBlock) && mod.Cmp(common.Big0) == 0
+	return config.IsPoS(nextBlock) && mod.Cmp(common.Big0) == 0
 }
 
 // Check whether the given difficulty is the inturn difficulty.
