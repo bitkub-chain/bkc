@@ -240,7 +240,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 		if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode {
 			return nil, errUnauthorizedSigner
 		}
-		if !isPoS(s.config, header.Number) {
+		if !s.config.IsPoS(header.Number) {
 			if _, ok := snap.Signers[signer]; !ok {
 				return nil, errUnauthorizedSigner
 			}
@@ -251,7 +251,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			}
 		}
 
-		if isPoS(s.config, header.Number) {
+		if s.config.IsPoS(header.Number) {
 			if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode {
 				return nil, errUnauthorizedSigner
 			}
@@ -270,7 +270,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			return nil, errInvalidVote
 		}
 
-		if !isPoS(s.config, header.Number) {
+		if !s.config.IsPoS(header.Number) {
 			// Header authorized, discard any previous votes from the signer
 			voteAddr := s.getVoteAddr(header)
 			for i, vote := range snap.Votes {
@@ -400,7 +400,7 @@ func (s *Snapshot) signers() []common.Address {
 // inturn returns if a signer at a given block height is in-turn or not.
 func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
 	bigNumber := new(big.Int).SetUint64(number)
-	if !isPoS(s.config, bigNumber) {
+	if !s.config.IsPoS(bigNumber) {
 		signers, offset := s.signers(), 0
 		for offset < len(signers) && signers[offset] != signer {
 			offset++
