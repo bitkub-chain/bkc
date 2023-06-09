@@ -428,7 +428,7 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 
 	signerBytesLength := common.AddressLength
 	if isNextBlockPoS(c.config, header.Number) {
-		checkpoint = isNextBlockASpanFirstBlock(c.config, header.Number)
+		checkpoint = shouldUpdateValidatorList(c.config, header.Number)
 		if checkpoint {
 			signerBytesLength = common.AddressLength * 2
 			signersBytes -= contractBytesLength
@@ -757,22 +757,21 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		}
 	}
 	if number > 0 && isNextBlockPoS(c.config, header.Number) {
-		if isNextBlockASpanFirstBlock(c.config, header.Number) {
-			newValidators, ca, err := c.GetCurrentValidators(header.ParentHash, new(big.Int).SetUint64(number+1))
+		if shouldUpdateValidatorList(c.config, header.Number) {
+			newValidators, systemContracts, err := c.GetCurrentValidators(header.ParentHash, new(big.Int).SetUint64(number+1))
 			if err != nil {
 				log.Error("GetCurrentValidators", "err", err.Error())
 				return errors.New("unknown validators")
 			}
-
 			for _, validator := range newValidators {
 				header.Extra = append(header.Extra, validator.HeaderBytes()...)
 			}
 			// // Add StakeManager bytes to header.Extra
-			header.Extra = append(header.Extra, ca.StakeManager.Bytes()...)
+			header.Extra = append(header.Extra, systemContracts.StakeManager.Bytes()...)
 			// // Add SlashManager bytes to header.Extra
-			header.Extra = append(header.Extra, ca.SlashManager.Bytes()...)
+			header.Extra = append(header.Extra, systemContracts.SlashManager.Bytes()...)
 			// // Add OfficialNode bytes to header.Extra
-			header.Extra = append(header.Extra, ca.OfficialNode.Bytes()...)
+			header.Extra = append(header.Extra, systemContracts.OfficialNode.Bytes()...)
 		}
 	}
 
@@ -890,7 +889,7 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 			return errInvalidDifficulty
 		}
 
-		if isNextBlockASpanFirstBlock(c.config, header.Number) {
+		if shouldUpdateValidatorList(c.config, header.Number) {
 			newValidators, _, err := c.GetCurrentValidators(header.ParentHash, new(big.Int).SetUint64(number+1))
 			if err != nil {
 				return err
@@ -1824,6 +1823,16 @@ func isNextBlockASpanFirstBlock(config *params.ChainConfig, number *big.Int) boo
 	mod := new(big.Int).Mod(nextBlock, bigSpan)
 	// is pos && (number + 1) % span == 0
 	return config.IsPoS(nextBlock) && mod.Cmp(common.Big0) == 0
+}
+
+// Check whether geth should update the validator list or not
+func shouldUpdateValidatorList(config *params.ChainConfig, number *big.Int) bool {
+	return isNextBlockASpanFirstBlock(config, number) || isNextBlockExactPoSBlock(config, number)
+}
+
+func isNextBlockExactPoSBlock(config *params.ChainConfig, number *big.Int) bool {
+	nextBlock := new(big.Int).Add(number, common.Big1)
+	return config.IsPoS(nextBlock) && config.PoSBlock.Cmp(nextBlock) == 0
 }
 
 // Check whether the given difficulty is the inturn difficulty.
