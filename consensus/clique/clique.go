@@ -82,8 +82,6 @@ var (
 
 	diffInTurn = big.NewInt(2) // Block difficulty for in-turn signatures
 	diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
-
-	span = uint64(50)
 )
 
 // Various error messages to mark blocks invalid. These should be private to
@@ -1473,7 +1471,7 @@ func (c *Clique) selectNextValidatorSet(parent *types.Header, seedBlock *types.H
 
 	weightedRanges, totalVotingPower := createWeightedRanges(votingPower)
 
-	for i := uint64(0); i < span; i++ {
+	for i := uint64(0); i < c.config.Clique.Span; i++ {
 		/*
 			random must be in [1, totalVotingPower] to avoid situation such as
 			2 validators with 1 staking power each.
@@ -1484,7 +1482,7 @@ func (c *Clique) selectNextValidatorSet(parent *types.Header, seedBlock *types.H
 		index := binarySearch(weightedRanges, targetWeight)
 		selectedProducers = append(selectedProducers, *newValidators[index])
 	}
-	return selectedProducers[:span], nil
+	return selectedProducers[:c.config.Clique.Span], nil
 }
 
 func binarySearch(array []uint64, search uint64) int {
@@ -1804,7 +1802,7 @@ func isNextBlockPoS(config *params.ChainConfig, number *big.Int) bool {
 
 // Check whether the given block is the commitment block (mid-span).
 func isSpanCommitmentBlock(config *params.ChainConfig, number *big.Int) bool {
-	bigSpan := new(big.Int).SetUint64(span)
+	bigSpan := new(big.Int).SetUint64(config.Clique.Span)
 
 	// number % span
 	mod := new(big.Int).Mod(number, bigSpan)
@@ -1818,14 +1816,14 @@ func isSpanCommitmentBlock(config *params.ChainConfig, number *big.Int) bool {
 
 // Check whether the given block is the first block of the span.
 func isSpanFirstBlock(config *params.ChainConfig, number *big.Int) bool {
-	bigSpan := new(big.Int).SetUint64(span)
+	bigSpan := new(big.Int).SetUint64(config.Clique.Span)
 	mod := new(big.Int).Mod(number, bigSpan)
 	return isPoS(config, number) && mod.Cmp(common.Big0) == 0
 }
 
 // Check whether the next block of the given block is the first block of the span.
 func isNextBlockASpanFirstBlock(config *params.ChainConfig, number *big.Int) bool {
-	bigSpan := new(big.Int).SetUint64(span)
+	bigSpan := new(big.Int).SetUint64(config.Clique.Span)
 	nextBlock := new(big.Int).Add(number, common.Big1)
 	// (number + 1) % span
 	mod := new(big.Int).Mod(nextBlock, bigSpan)
