@@ -1059,7 +1059,7 @@ func (c *Clique) distributeIncoming(val common.Address, state *state.StateDB, he
 	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool, snap *Snapshot) error {
 	coinbase := header.Coinbase
 	balance := state.GetBalance(consensus.SystemAddress)
-	if balance.Cmp(common.Big0) <= 0 { 
+	if balance.Cmp(common.Big0) <= 0 {
 		return nil
 	}
 	state.SetBalance(consensus.SystemAddress, big.NewInt(0))
@@ -1774,6 +1774,7 @@ func (c *Clique) GetEligibleValidators(headerHash common.Hash, blockNumber uint6
 
 	return valz, nil
 }
+
 // Check whether the given block is in proof-of-stake period.
 func isPoS(config *params.ChainConfig, number *big.Int) bool {
 	return config.IsPoS(number)
@@ -1811,9 +1812,8 @@ func isNextBlockASpanFirstBlock(config *params.ChainConfig, number *big.Int) boo
 	nextBlock := new(big.Int).Add(number, common.Big1)
 	// (number + 1) % span
 	mod := new(big.Int).Mod(nextBlock, bigSpan)
-
 	// is pos && (number + 1) % span == 0
-	return isPoS(config, number) && mod.Cmp(common.Big0) == 0
+	return isPoS(config, nextBlock) && mod.Cmp(common.Big0) == 0
 }
 
 // Check whether the given difficulty is a inturn difficulty.
