@@ -240,7 +240,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 		if _, ok := snap.Signers[signer]; !ok && signer != snap.POSAddress.OfficialNode {
 			return nil, errUnauthorizedSigner
 		}
-		if !s.config.IsPoS(new(big.Int).SetUint64(number)) {
+		if !isPoS(s.config, header.Number) {
 			if _, ok := snap.Signers[signer]; !ok {
 				return nil, errUnauthorizedSigner
 			}
@@ -251,7 +251,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			}
 		}
 
-		if s.config.IsPoS(new(big.Int).SetUint64(number)) {
+		if isPoS(s.config, header.Number) {
 			if _, ok := snap.Signers[signer]; !ok && signer != snap.POSAddress.OfficialNode {
 				return nil, errUnauthorizedSigner
 			}
@@ -270,7 +270,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			return nil, errInvalidVote
 		}
 
-		if !s.config.IsPoS(new(big.Int).SetUint64(number)) {
+		if !isPoS(s.config, header.Number) {
 			// Header authorized, discard any previous votes from the signer
 			voteAddr := s.getVoteAddr(header)
 			for i, vote := range snap.Votes {
@@ -327,8 +327,8 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			}
 		}
 
-		if s.config.IsPoS(new(big.Int).SetUint64(number + 1)) {
-			if number > 0 && (number+1)%span == 0 {
+		if isNextBlockPoS(s.config, header.Number) {
+			if number > 0 && isNextBlockASpanFirstBlock(s.config, header.Number) {
 				posBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
 				if len(posBytes) < contractBytesLength {
 					log.Error("posBytes error", "bytes", posBytes)
@@ -399,7 +399,8 @@ func (s *Snapshot) signers() []common.Address {
 
 // inturn returns if a signer at a given block height is in-turn or not.
 func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
-	if !s.config.IsPoS(new(big.Int).SetUint64(number)) {
+	bigNumber := new(big.Int).SetUint64(number)
+	if !isPoS(s.config, bigNumber) {
 		signers, offset := s.signers(), 0
 		for offset < len(signers) && signers[offset] != signer {
 			offset++
