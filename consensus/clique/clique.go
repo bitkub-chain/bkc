@@ -1775,7 +1775,7 @@ func (c *Clique) GetEligibleValidators(headerHash common.Hash, blockNumber uint6
 	return valz, nil
 }
 
-// Check whether the given block is in proof-of-stake period.
+// Check whether the given block is in the proof-of-stake period.
 func isPoS(config *params.ChainConfig, number *big.Int) bool {
 	return config.IsPoS(number)
 }
@@ -1785,7 +1785,7 @@ func isNextBlockPoS(config *params.ChainConfig, number *big.Int) bool {
 	return isPoS(config, new(big.Int).Add(number, common.Big1))
 }
 
-// Check whether the given block is a commitment block (mid-span).
+// Check whether the given block is the commitment block (mid-span).
 func isSpanCommitmentBlock(config *params.ChainConfig, number *big.Int) bool {
 	bigSpan := new(big.Int).SetUint64(span)
 
@@ -1799,14 +1799,14 @@ func isSpanCommitmentBlock(config *params.ChainConfig, number *big.Int) bool {
 	return isPoS(config, number) && mod.Cmp(midSpan) == 0
 }
 
-// Check whether the given block is a first block of the span.
+// Check whether the given block is the first block of the span.
 func isSpanFirstBlock(config *params.ChainConfig, number *big.Int) bool {
 	bigSpan := new(big.Int).SetUint64(span)
 	mod := new(big.Int).Mod(number, bigSpan)
 	return isPoS(config, number) && mod.Cmp(common.Big0) == 0
 }
 
-// Check whether the next block of the given block is a first block of the span.
+// Check whether the next block of the given block is the first block of the span.
 func isNextBlockASpanFirstBlock(config *params.ChainConfig, number *big.Int) bool {
 	bigSpan := new(big.Int).SetUint64(span)
 	nextBlock := new(big.Int).Add(number, common.Big1)
@@ -1816,12 +1816,12 @@ func isNextBlockASpanFirstBlock(config *params.ChainConfig, number *big.Int) boo
 	return isPoS(config, nextBlock) && mod.Cmp(common.Big0) == 0
 }
 
-// Check whether the given difficulty is a inturn difficulty.
+// Check whether the given difficulty is the inturn difficulty.
 func isInturnDifficulty(diff *big.Int) bool {
 	return diff.Cmp(diffInTurn) == 0
 }
 
-// Check whether the given difficulty is a noturn difficulty.
+// Check whether the given difficulty is the noturn difficulty.
 func isNoturnDifficulty(diff *big.Int) bool {
 	return diff.Cmp(diffNoTurn) == 0
 }
