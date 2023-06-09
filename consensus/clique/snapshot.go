@@ -32,7 +32,7 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 )
 
-type POSAddress struct {
+type SystemContracts struct {
 	StakeManager common.Address `json:"stakeManager"`
 	SlashManager common.Address `json:"slashManager"`
 	OfficialNode common.Address `json:"officialNode"`
@@ -60,14 +60,14 @@ type Snapshot struct {
 	config   *params.ChainConfig // Consensus engine parameters to fine tune behavior
 	sigcache *lru.ARCCache       // Cache of recent block signatures to speed up ecrecover
 
-	Number     uint64                      `json:"number"`     // Block number where the snapshot was created
-	Hash       common.Hash                 `json:"hash"`       // Block hash where the snapshot was created
-	Signers    map[common.Address]struct{} `json:"signers"`    // Set of authorized signers at this moment
-	Validators []common.Address            `json:"validators"` // Validator set at this moment
-	Recents    map[uint64]common.Address   `json:"recents"`    // Set of recent signers for spam protections
-	Votes      []*Vote                     `json:"votes"`      // List of votes cast in chronological order
-	Tally      map[common.Address]Tally    `json:"tally"`      // Current vote tally to avoid recalculating
-	POSAddress POSAddress                  `json:"posAddress"` // PoS consensus addresses storage
+	Number          uint64                      `json:"number"`          // Block number where the snapshot was created
+	Hash            common.Hash                 `json:"hash"`            // Block hash where the snapshot was created
+	Signers         map[common.Address]struct{} `json:"signers"`         // Set of authorized signers at this moment
+	Validators      []common.Address            `json:"validators"`      // Validator set at this moment
+	Recents         map[uint64]common.Address   `json:"recents"`         // Set of recent signers for spam protections
+	Votes           []*Vote                     `json:"votes"`           // List of votes cast in chronological order
+	Tally           map[common.Address]Tally    `json:"tally"`           // Current vote tally to avoid recalculating
+	SystemContracts SystemContracts             `json:"SystemContracts"` // PoS consensus addresses storage
 }
 
 // signersAscending implements the sort interface to allow sorting a list of addresses
@@ -127,16 +127,16 @@ func (s *Snapshot) store(db ethdb.Database) error {
 // copy creates a deep copy of the snapshot, though not the individual votes.
 func (s *Snapshot) copy() *Snapshot {
 	cpy := &Snapshot{
-		config:     s.config,
-		sigcache:   s.sigcache,
-		Number:     s.Number,
-		Hash:       s.Hash,
-		Signers:    make(map[common.Address]struct{}),
-		Validators: s.Validators,
-		POSAddress: s.POSAddress,
-		Recents:    make(map[uint64]common.Address),
-		Votes:      make([]*Vote, len(s.Votes)),
-		Tally:      make(map[common.Address]Tally),
+		config:          s.config,
+		sigcache:        s.sigcache,
+		Number:          s.Number,
+		Hash:            s.Hash,
+		Signers:         make(map[common.Address]struct{}),
+		Validators:      s.Validators,
+		SystemContracts: s.SystemContracts,
+		Recents:         make(map[uint64]common.Address),
+		Votes:           make([]*Vote, len(s.Votes)),
+		Tally:           make(map[common.Address]Tally),
 	}
 	for signer := range s.Signers {
 		cpy.Signers[signer] = struct{}{}
@@ -237,7 +237,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			return nil, err
 		}
 
-		if _, ok := snap.Signers[signer]; !ok && signer != snap.POSAddress.OfficialNode {
+		if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode {
 			return nil, errUnauthorizedSigner
 		}
 		if !isPoS(s.config, header.Number) {
@@ -252,7 +252,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 		}
 
 		if isPoS(s.config, header.Number) {
-			if _, ok := snap.Signers[signer]; !ok && signer != snap.POSAddress.OfficialNode {
+			if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode {
 				return nil, errUnauthorizedSigner
 			}
 		}
@@ -367,9 +367,9 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 
 				snap.Signers = newVals
 				snap.Validators = validators
-				snap.POSAddress.StakeManager = *contracts[0]
-				snap.POSAddress.SlashManager = *contracts[1]
-				snap.POSAddress.OfficialNode = *contracts[2]
+				snap.SystemContracts.StakeManager = *contracts[0]
+				snap.SystemContracts.SlashManager = *contracts[1]
+				snap.SystemContracts.OfficialNode = *contracts[2]
 			}
 		}
 		// If we're taking too much time (ecrecover), notify the user once a while

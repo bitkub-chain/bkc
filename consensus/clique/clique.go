@@ -174,8 +174,8 @@ func (c *Clique) isToSystemContract(to common.Address, snap *Snapshot) bool {
 	// Map system contracts
 	systemContracts := map[common.Address]bool{
 		c.config.Clique.ValidatorContract: true,
-		snap.POSAddress.StakeManager:      true,
-		snap.POSAddress.SlashManager:      true,
+		snap.SystemContracts.StakeManager: true,
+		snap.SystemContracts.SlashManager: true,
 	}
 	return systemContracts[to]
 }
@@ -678,7 +678,7 @@ func (c *Clique) verifySealPoS(snap *Snapshot, header *types.Header, parents []*
 	if err != nil {
 		return err
 	}
-	if _, ok := snap.Signers[signer]; !ok && signer != snap.POSAddress.OfficialNode {
+	if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode {
 		return errUnauthorizedSigner
 	}
 
@@ -888,7 +888,7 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 		}
 		number := header.Number.Uint64()
 		blockSinger, _ := ecrecover(header, c.signatures)
-		if isNoturnDifficulty(header.Difficulty) && blockSinger != snap.POSAddress.OfficialNode {
+		if isNoturnDifficulty(header.Difficulty) && blockSinger != snap.SystemContracts.OfficialNode {
 			return errInvalidDifficulty
 		}
 
@@ -925,12 +925,12 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 		}
 
 		// noturn is only permitted from official node
-		if !isInturnDifficulty(header.Difficulty) && header.Coinbase != snap.POSAddress.OfficialNode {
+		if !isInturnDifficulty(header.Difficulty) && header.Coinbase != snap.SystemContracts.OfficialNode {
 			return errUnauthorizedSigner
 		}
 
 		// Begin slashing state update
-		if !isInturnDifficulty(header.Difficulty) && header.Coinbase == snap.POSAddress.OfficialNode {
+		if !isInturnDifficulty(header.Difficulty) && header.Coinbase == snap.SystemContracts.OfficialNode {
 			log.Info("ℹ️  Commited by official node", "validator", header.Coinbase, "diff", header.Difficulty, "number", header.Number)
 			inturnSigner := snap.getInturnSigner(header.Number.Uint64())
 			log.Info("🗡️  Slashing validator", "signer", inturnSigner, "diff", header.Difficulty, "number", header.Number)
@@ -972,7 +972,7 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 			}
 		}
 		// Begin slashing
-		if !isInturnDifficulty(header.Difficulty) && header.Coinbase == snap.POSAddress.OfficialNode {
+		if !isInturnDifficulty(header.Difficulty) && header.Coinbase == snap.SystemContracts.OfficialNode {
 			inturnSigner := snap.getInturnSigner(header.Number.Uint64())
 			log.Info("🗡️  Slashing validator (FAA)", "signer", inturnSigner, "diff", header.Difficulty, "number", header.Number)
 			if err != nil {
@@ -1011,7 +1011,7 @@ func (c *Clique) slash(spoiledVal common.Address, chain consensus.ChainHeaderRea
 		currentSpan = new(big.Int).Add(currentSpan, common.Big1)
 	}
 
-	slashed, err := c.isSlashed(chain, spoiledVal, currentSpan, header) 
+	slashed, err := c.isSlashed(chain, spoiledVal, currentSpan, header)
 
 	if err != nil {
 		return err
@@ -1034,7 +1034,7 @@ func (c *Clique) slash(spoiledVal common.Address, chain consensus.ChainHeaderRea
 		return err
 	}
 	// get system message
-	msg := c.getSystemMessage(header.Coinbase, common.HexToAddress(snap.POSAddress.SlashManager.String()), data, common.Big0)
+	msg := c.getSystemMessage(header.Coinbase, common.HexToAddress(snap.SystemContracts.SlashManager.String()), data, common.Big0)
 	// apply message
 	return c.applyTransaction(msg, state, header, cx, txs, receipts, receivedTxs, usedGas, mining)
 
@@ -1095,7 +1095,7 @@ func (c *Clique) distributeToValidator(amount *big.Int, validator common.Address
 		return err
 	}
 	// get system message
-	msg := c.getSystemMessage(header.Coinbase, snap.POSAddress.StakeManager, data, amount)
+	msg := c.getSystemMessage(header.Coinbase, snap.SystemContracts.StakeManager, data, amount)
 	// apply message
 	return c.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
 }
@@ -1177,7 +1177,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		}
 	}
 	if isPoS(c.config, header.Number) {
-		if _, authorized := snap.Signers[val]; !authorized && val != snap.POSAddress.OfficialNode {
+		if _, authorized := snap.Signers[val]; !authorized && val != snap.SystemContracts.OfficialNode {
 			return errUnauthorizedSigner
 		}
 	}
@@ -1254,7 +1254,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 			case <-stop:
 				return
 			case <-time.After(defaultWaitTime * time.Second):
-				if val != snap.POSAddress.OfficialNode {
+				if val != snap.SystemContracts.OfficialNode {
 					<-stop
 					return
 				}
@@ -1336,7 +1336,7 @@ func (c *Clique) isSlashed(chain consensus.ChainHeaderReader, signer common.Addr
 
 	// call
 	msgData := (hexutil.Bytes)(data)
-	toAddress := snap.POSAddress.SlashManager
+	toAddress := snap.SystemContracts.SlashManager
 	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
 	result, err := c.ethAPI.Call(ctx, ethapi.TransactionArgs{
 		Gas:  &gas,
@@ -1354,7 +1354,7 @@ func (c *Clique) isSlashed(chain consensus.ChainHeaderReader, signer common.Addr
 	return out, nil
 }
 
-func (c *Clique) GetCurrentValidators(headerHash common.Hash, blockNumber *big.Int) ([]*Validator, *POSAddress, error) {
+func (c *Clique) GetCurrentValidators(headerHash common.Hash, blockNumber *big.Int) ([]*Validator, *SystemContracts, error) {
 	// block
 	blockNr := rpc.BlockNumberOrHashWithHash(headerHash, false)
 
@@ -1408,7 +1408,7 @@ func (c *Clique) GetCurrentValidators(headerHash common.Hash, blockNumber *big.I
 			VotingPower: (*ret1)[i].Int64(),
 		}
 	}
-	ca := &POSAddress{
+	ca := &SystemContracts{
 		StakeManager: (*ret2)[0],
 		SlashManager: (*ret2)[1],
 		OfficialNode: (*ret2)[2],
