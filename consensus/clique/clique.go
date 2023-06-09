@@ -1786,6 +1786,7 @@ func (c *Clique) GetEligibleValidators(headerHash common.Hash, blockNumber uint6
 	return valz, nil
 }
 
+// Check whether the given block is in the first block of an epoch
 func isOnEpochStart(config *params.ChainConfig, number *big.Int) bool {
 	n := number.Uint64()
 	return n%config.Clique.Epoch == 0
