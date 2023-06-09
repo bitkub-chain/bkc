@@ -1010,6 +1010,17 @@ func (c *Clique) slash(spoiledVal common.Address, chain consensus.ChainHeaderRea
 	if isSpanFirstBlock(c.config, header.Number) {
 		currentSpan = new(big.Int).Add(currentSpan, common.Big1)
 	}
+
+	slashed, err := c.isSlashed(chain, spoiledVal, currentSpan, header) 
+
+	if err != nil {
+		return err
+	}
+	// ignore slash
+	if slashed {
+		return nil
+	}
+
 	// method
 	method := "slash"
 
@@ -1235,7 +1246,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		case <-time.After(delay):
 		}
 		if isPoS(c.config, header.Number) && (!isInturnDifficulty(header.Difficulty) || slashed) {
-			defaultWaitTime := time.Duration(1)
+			defaultWaitTime := time.Duration(2)
 			if slashed {
 				defaultWaitTime = time.Duration(0)
 			}
