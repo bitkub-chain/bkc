@@ -697,3 +697,136 @@ func TestCliqueErawanTransition(t *testing.T) {
 		}
 	}
 }
+
+func TestCliquePoSTransition(t *testing.T) {
+	type validators struct {
+		address string
+		power   uint64
+	}
+	tests := []struct {
+		firstValidatorSet []validators
+		epoch             uint64
+		signers           []string
+		results           []string
+		validators        []string
+		checkValidates    []common.Address
+	}{
+		{
+			firstValidatorSet: []validators{
+				{
+					address: "B",
+					power:   10,
+				},
+				{
+					address: "C",
+					power:   10,
+				},
+			},
+			signers: []string{"A", "B"},
+			results: []string{"A", "B"},
+		},
+	}
+
+	// Run through the scenarios and test them
+	for _, tt := range tests {
+		// Create the account pool and generate the initial set of signers
+		accounts := newTesterAccountPool()
+
+		signers := make([]common.Address, len(tt.signers))
+		for j, signer := range tt.signers {
+			signers[j] = accounts.address(signer)
+		}
+		for j := 0; j < len(signers); j++ {
+			for k := j + 1; k < len(signers); k++ {
+				if bytes.Compare(signers[j][:], signers[k][:]) > 0 {
+					signers[j], signers[k] = signers[k], signers[j]
+				}
+			}
+		}
+		// Create the genesis block with the initial set of signers
+		genesis := &core.Genesis{
+			ExtraData: make([]byte, extraVanity+common.AddressLength*len(signers)+extraSeal),
+			BaseFee:   big.NewInt(params.InitialBaseFee),
+		}
+		for j, signer := range signers {
+			copy(genesis.ExtraData[extraVanity+j*common.AddressLength:], signer[:])
+		}
+		// Create a pristine blockchain with the genesis injected
+		db := rawdb.NewMemoryDatabase()
+		genesis.Commit(db)
+
+		// Assemble a chain of headers from the cast votes
+		config := *params.TestChainConfig
+		config.ErawanBlock = common.Big0
+		config.PoSBlock = big.NewInt(50)
+		config.MuirGlacierBlock = nil
+		config.BerlinBlock = nil
+		config.LondonBlock = nil
+		config.ArrowGlacierBlock = nil
+		config.MergeForkBlock = nil
+		config.Clique = &params.CliqueConfig{
+			Period: 1,
+			Span:   50,
+			Epoch:  300,
+		}
+		engine := New(&config, db, nil)
+		engine.fakeDiff = true
+
+		valz_1 := make([]Validator, config.Clique.Span)
+		for v := 0; v < int(config.Clique.Span); v++ {
+			valz_1[v] = Validator{
+				Address:     accounts.address(tt.firstValidatorSet[v%len(signers)].address),
+				VotingPower: tt.firstValidatorSet[0].power,
+			}
+			tt.checkValidates = append(tt.checkValidates, accounts.address(tt.firstValidatorSet[v%len(signers)].address))
+		}
+
+		blocks, _ := core.GenerateChain(&config, genesis.ToBlock(db), engine, db, int(config.Clique.Span)-1, func(i int, block *core.BlockGen) {
+		})
+
+		for j, block := range blocks {
+			// Get the header and prepare it for signing
+			header := block.Header()
+			if j > 0 {
+				header.ParentHash = blocks[j-1].Hash()
+			}
+
+			// Ensure the extra data has all its components
+			if len(header.Extra) < extraVanity {
+				header.Extra = append(header.Extra, bytes.Repeat([]byte{0x00}, extraVanity-len(header.Extra))...)
+			}
+			header.Extra = header.Extra[:extraVanity]
+
+			if (header.Number.Uint64()+1)%config.Clique.Span == 0 {
+				for _, validator := range valz_1 {
+					header.Extra = append(header.Extra, validator.HeaderBytes()...)
+				}
+				header.Extra = append(header.Extra, common.Address{}.Bytes()...)
+				header.Extra = append(header.Extra, common.Address{}.Bytes()...)
+				header.Extra = append(header.Extra, common.Address{}.Bytes()...)
+			}
+			header.Extra = append(header.Extra, make([]byte, extraSeal)...)
+			header.Difficulty = diffInTurn
+
+			accounts.sign(header, tt.signers[j%len(signers)])
+			blocks[j] = block.WithSeal(header)
+		}
+
+		chain, _ := core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil, nil)
+		chain.InsertChain(blocks)
+
+		parent := chain.GetBlockByHash(chain.CurrentBlock().Hash())
+
+		snap, _ := engine.snapshot(chain, parent.Number().Uint64(), parent.Hash(), nil)
+
+		for c := 0; c < len(snap.Validators); c++ {
+			if bytes.Compare(tt.checkValidates[c][:], snap.Validators[c][:]) > 0 {
+				t.Errorf("validators mismatch: have %x, want %x", snap.Validators[c], tt.checkValidates[c])
+			}
+		}
+		if len(tt.results) != len(snap.Signers) {
+			t.Errorf("signers mismatch: have %d, want %d", len(snap.Signers), len(snap.Signers))
+			continue
+		}
+	}
+}

@@ -19,7 +19,6 @@ package core
 import (
 	"crypto/ecdsa"
 	"errors"
-	"fmt"
 	"math/big"
 	"testing"
 
@@ -253,7 +252,6 @@ func TestStateProcessorErrors(t *testing.T) {
 				want: types.ErrTxTypeNotSupported,
 			},
 		} {
-			fmt.Printf("======= genesis ======== %v", gspec.Config)
 			block := GenerateBadBlock(genesis, ethash.NewFaker(), tt.txs, gspec.Config)
 			_, err := blockchain.InsertChain(types.Blocks{block})
 			if err == nil {
