@@ -428,7 +428,7 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 
 	signerBytesLength := common.AddressLength
 	if isNextBlockPoS(c.config, header.Number) {
-		checkpoint = needToUpdatValidatorList(c.config, header.Number)
+		checkpoint = needToUpdateValidatorList(c.config, header.Number)
 		if checkpoint {
 			signerBytesLength = common.AddressLength * 2
 			signersBytes -= contractBytesLength
@@ -757,7 +757,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		}
 	}
 	if number > 0 && isNextBlockPoS(c.config, header.Number) {
-		if needToUpdatValidatorList(c.config, header.Number) {
+		if needToUpdateValidatorList(c.config, header.Number) {
 			newValidators, systemContracts, err := c.GetCurrentValidators(header.ParentHash, new(big.Int).SetUint64(number+1))
 			if err != nil {
 				log.Error("GetCurrentValidators", "err", err.Error())
@@ -889,7 +889,7 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 			return errInvalidDifficulty
 		}
 
-		if needToUpdatValidatorList(c.config, header.Number) {
+		if needToUpdateValidatorList(c.config, header.Number) {
 			newValidators, _, err := c.GetCurrentValidators(header.ParentHash, new(big.Int).SetUint64(number+1))
 			if err != nil {
 				return err
@@ -1826,7 +1826,7 @@ func isNextBlockASpanFirstBlock(config *params.ChainConfig, number *big.Int) boo
 }
 
 // Check whether geth should update the validator list or not
-func needToUpdatValidatorList(config *params.ChainConfig, number *big.Int) bool {
+func needToUpdateValidatorList(config *params.ChainConfig, number *big.Int) bool {
 	return isNextBlockASpanFirstBlock(config, number) || isNextBlockExactPoSBlock(config, number)
 }
 
