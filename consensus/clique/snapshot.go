@@ -67,7 +67,7 @@ type Snapshot struct {
 	Recents         map[uint64]common.Address   `json:"recents"`         // Set of recent signers for spam protections
 	Votes           []*Vote                     `json:"votes"`           // List of votes cast in chronological order
 	Tally           map[common.Address]Tally    `json:"tally"`           // Current vote tally to avoid recalculating
-	SystemContracts SystemContracts             `json:"SystemContracts"` // PoS consensus addresses storage
+	SystemContracts SystemContracts             `json:"systemContracts"` // System contract addresses
 }
 
 // signersAscending implements the sort interface to allow sorting a list of addresses

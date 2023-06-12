@@ -1826,7 +1826,7 @@ func isNextBlockASpanFirstBlock(config *params.ChainConfig, number *big.Int) boo
 }
 
 // Check whether geth should update the validator list or not
-func shouldUpdateValidatorList(config *params.ChainConfig, number *big.Int) bool {
+func needToUpdatValidatorList(config *params.ChainConfig, number *big.Int) bool {
 	return isNextBlockASpanFirstBlock(config, number) || isNextBlockExactPoSBlock(config, number)
 }
 
