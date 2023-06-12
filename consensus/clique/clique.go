@@ -82,8 +82,6 @@ var (
 
 	diffInTurn = big.NewInt(2) // Block difficulty for in-turn signatures
 	diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
-
-	span = uint64(50)
 )
 
 // Various error messages to mark blocks invalid. These should be private to
@@ -174,8 +172,8 @@ func (c *Clique) isToSystemContract(to common.Address, snap *Snapshot) bool {
 	// Map system contracts
 	systemContracts := map[common.Address]bool{
 		c.config.Clique.ValidatorContract: true,
-		snap.POSAddress.StakeManager:      true,
-		snap.POSAddress.SlashManager:      true,
+		snap.SystemContracts.StakeManager: true,
+		snap.SystemContracts.SlashManager: true,
 	}
 	return systemContracts[to]
 }
@@ -237,12 +235,12 @@ type Clique struct {
 // Validator represets Volatile state for each Validator
 type Validator struct {
 	Address     common.Address `json:"signer"`
-	VotingPower int64          `json:"power"`
+	VotingPower uint64         `json:"power"`
 	// ProposerPriority int64          `json:"accum"`
 }
 
 // NewValidator creates new validator
-func NewValidator(address common.Address, votingPower int64) *Validator {
+func NewValidator(address common.Address, votingPower uint64) *Validator {
 	return &Validator{
 		Address:     address,
 		VotingPower: votingPower,
@@ -396,7 +394,7 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 		return consensus.ErrFutureBlock
 	}
 	// Checkpoint blocks need to enforce zero beneficiary
-	checkpoint := (number % c.config.Clique.Epoch) == 0
+	checkpoint := isOnEpochStart(c.config, header.Number)
 	if chain.Config().IsErawan(header.Number) {
 		voteAddr := c.getVoteAddr(header)
 		if checkpoint && voteAddr != (common.Address{}) {
@@ -429,8 +427,8 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	signersBytes := len(header.Extra) - extraVanity - extraSeal
 
 	signerBytesLength := common.AddressLength
-	if chain.Config().IsPoS(new(big.Int).SetUint64(number + 1)) {
-		checkpoint = (number+1)%span == 0
+	if isNextBlockPoS(c.config, header.Number) {
+		checkpoint = needToUpdateValidatorList(c.config, header.Number)
 		if checkpoint {
 			signerBytesLength = common.AddressLength * 2
 			signersBytes -= contractBytesLength
@@ -451,8 +449,8 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	}
 	// Ensure that the block's difficulty is meaningful (may not be correct at this point)
 	if number > 0 {
-		if !chain.Config().IsPoS(header.Number) {
-			if header.Difficulty == nil || (header.Difficulty.Cmp(diffInTurn) != 0 && header.Difficulty.Cmp(diffNoTurn) != 0) {
+		if !c.config.IsPoS(header.Number) {
+			if header.Difficulty == nil || (!isInturnDifficulty(header.Difficulty) && !isNoturnDifficulty(header.Difficulty)) {
 				return errInvalidDifficulty
 			}
 		}
@@ -514,20 +512,20 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 		return err
 	}
 	// If the block is a checkpoint block, verify the signer list
-	if number%c.config.Clique.Epoch == 0 {
+	if isOnEpochStart(c.config, header.Number) {
 		signers := make([]byte, len(snap.Signers)*common.AddressLength)
 		for i, val := range snap.signers() {
 			copy(signers[i*common.AddressLength:], val[:])
 		}
 		extraSuffix := len(header.Extra) - extraSeal
-		if !chain.Config().IsPoS(header.Number) {
+		if !c.config.IsPoS(header.Number) {
 			if !bytes.Equal(header.Extra[extraVanity:extraSuffix], signers) {
 				return errMismatchingCheckpointSigners
 			}
 		}
 	}
 	// All basic checks passed, verify the seal and return
-	if chain.Config().IsPoS(header.Number) {
+	if c.config.IsPoS(header.Number) {
 		return c.verifySealPoS(snap, header, parents)
 	}
 	return c.verifySeal(snap, header, parents)
@@ -558,7 +556,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		// at a checkpoint block without a parent (light client CHT), or we have piled
 		// up more headers than allowed to be reorged (chain reinit from a freezer),
 		// consider the checkpoint trusted and snapshot it.
-		if number == 0 || (number%c.config.Clique.Epoch == 0 && (len(headers) > params.FullImmutabilityThreshold || chain.GetHeaderByNumber(number-1) == nil)) {
+		if number == 0 || isOnEpochStart(c.config, new(big.Int).SetUint64(number)) && (len(headers) > params.FullImmutabilityThreshold || chain.GetHeaderByNumber(number-1) == nil) {
 			checkpoint := chain.GetHeaderByNumber(number)
 			if checkpoint != nil {
 				hash := checkpoint.Hash()
@@ -657,10 +655,10 @@ func (c *Clique) verifySeal(snap *Snapshot, header *types.Header, parents []*typ
 	// Ensure that the difficulty corresponds to the turn-ness of the signer
 	if !c.fakeDiff {
 		inturn := snap.inturn(header.Number.Uint64(), signer)
-		if inturn && header.Difficulty.Cmp(diffInTurn) != 0 {
+		if inturn && !isInturnDifficulty(header.Difficulty) {
 			return errWrongDifficulty
 		}
-		if !inturn && header.Difficulty.Cmp(diffNoTurn) != 0 {
+		if !inturn && !isNoturnDifficulty(header.Difficulty) {
 			return errWrongDifficulty
 		}
 	}
@@ -678,17 +676,17 @@ func (c *Clique) verifySealPoS(snap *Snapshot, header *types.Header, parents []*
 	if err != nil {
 		return err
 	}
-	if _, ok := snap.Signers[signer]; !ok && signer != snap.POSAddress.OfficialNode {
+	if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode {
 		return errUnauthorizedSigner
 	}
 
 	// Ensure that the difficulty corresponds to the turn-ness of the signer
 	if !c.fakeDiff {
 		inturn := snap.inturn(header.Number.Uint64(), signer)
-		if inturn && header.Difficulty.Cmp(diffInTurn) != 0 {
+		if inturn && !isInturnDifficulty(header.Difficulty) {
 			return errWrongDifficulty
 		}
-		if !inturn && header.Difficulty.Cmp(diffNoTurn) != 0 {
+		if !inturn && !isNoturnDifficulty(header.Difficulty) {
 			return errWrongDifficulty
 		}
 	}
@@ -703,7 +701,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	if !chain.Config().IsErawan(header.Number) {
 		header.Coinbase = common.Address{}
 	}
-	if chain.Config().IsPoS(header.Number) {
+	if c.config.IsPoS(header.Number) {
 		header.Coinbase = c.val
 	}
 	header.Nonce = types.BlockNonce{}
@@ -714,7 +712,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		return err
 	}
 
-	if number%c.config.Clique.Epoch != 0 {
+	if !isOnEpochStart(c.config, header.Number) {
 		c.lock.RLock()
 
 		// Gather all the proposals that make sense voting on
@@ -751,30 +749,29 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	}
 	header.Extra = header.Extra[:extraVanity]
 
-	if number%c.config.Clique.Epoch == 0 {
-		if !chain.Config().IsPoS(header.Number) {
+	if isOnEpochStart(c.config, header.Number) {
+		if !c.config.IsPoS(header.Number) {
 			for _, signer := range snap.signers() {
 				header.Extra = append(header.Extra, signer[:]...)
 			}
 		}
 	}
-	if number > 0 && chain.Config().IsPoS(new(big.Int).SetUint64(number+1)) {
-		if (number+1)%span == 0 {
-			newValidators, ca, err := c.GetCurrentValidators(header.ParentHash, new(big.Int).SetUint64(number+1))
+	if number > 0 && isNextBlockPoS(c.config, header.Number) {
+		if needToUpdateValidatorList(c.config, header.Number) {
+			newValidators, systemContracts, err := c.GetCurrentValidators(header.ParentHash, new(big.Int).SetUint64(number+1))
 			if err != nil {
 				log.Error("GetCurrentValidators", "err", err.Error())
 				return errors.New("unknown validators")
 			}
-
 			for _, validator := range newValidators {
 				header.Extra = append(header.Extra, validator.HeaderBytes()...)
 			}
 			// // Add StakeManager bytes to header.Extra
-			header.Extra = append(header.Extra, ca.StakeManager.Bytes()...)
+			header.Extra = append(header.Extra, systemContracts.StakeManager.Bytes()...)
 			// // Add SlashManager bytes to header.Extra
-			header.Extra = append(header.Extra, ca.SlashManager.Bytes()...)
+			header.Extra = append(header.Extra, systemContracts.SlashManager.Bytes()...)
 			// // Add OfficialNode bytes to header.Extra
-			header.Extra = append(header.Extra, ca.OfficialNode.Bytes()...)
+			header.Extra = append(header.Extra, systemContracts.OfficialNode.Bytes()...)
 		}
 	}
 
@@ -829,7 +826,7 @@ func ParseValidatorsAndPower(validatorsBytes []byte) ([]*Validator, error) {
 		copy(address, validatorsBytes[i:i+20])
 		copy(power, validatorsBytes[i+20:i+40])
 
-		result[i/40] = NewValidator(common.BytesToAddress(address), big.NewInt(0).SetBytes(power).Int64())
+		result[i/40] = NewValidator(common.BytesToAddress(address), big.NewInt(0).SetBytes(power).Uint64())
 	}
 	log.Info("validators from extra", "result", result)
 	return result, nil
@@ -870,7 +867,7 @@ func (v *Validator) HeaderBytes() []byte {
 
 // PowerBytes return power bytes
 func (v *Validator) PowerBytes() []byte {
-	powerBytes := big.NewInt(0).SetInt64(v.VotingPower).Bytes()
+	powerBytes := big.NewInt(0).SetUint64(v.VotingPower).Bytes()
 	result := make([]byte, 20)
 	copy(result[20-len(powerBytes):], powerBytes)
 	return result
@@ -881,18 +878,18 @@ func (v *Validator) PowerBytes() []byte {
 func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB, txs *[]*types.Transaction,
 	uncles []*types.Header, receipts *[]*types.Receipt, systemTxs *[]*types.Transaction, usedGas *uint64) error {
 
-	if chain.Config().IsPoS(header.Number) {
+	if c.config.IsPoS(header.Number) {
 		snap, err := c.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil)
 		if err != nil {
 			panic(err)
 		}
 		number := header.Number.Uint64()
-		blockSinger, _ := ecrecover(header, c.signatures)
-		if header.Difficulty.Cmp(diffNoTurn) == 0 && blockSinger != snap.POSAddress.OfficialNode {
+		blockSigner, _ := ecrecover(header, c.signatures)
+		if isNoturnDifficulty(header.Difficulty) && blockSigner != snap.SystemContracts.OfficialNode {
 			return errInvalidDifficulty
 		}
 
-		if (number+1)%span == 0 {
+		if needToUpdateValidatorList(c.config, header.Number) {
 			newValidators, _, err := c.GetCurrentValidators(header.ParentHash, new(big.Int).SetUint64(number+1))
 			if err != nil {
 				return err
@@ -912,7 +909,7 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 		cx := chainContext{Chain: chain, clique: c}
 		val := header.Coinbase
 		if systemTxs != nil {
-			if header.Number.Uint64()%span == (span/2)+1 {
+			if isSpanCommitmentBlock(c.config, header.Number) {
 				err := c.commitSpan(c.val, state, header, cx, txs, receipts, systemTxs, usedGas, false)
 				if err != nil {
 					return errInvalidSpan
@@ -925,19 +922,19 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 		}
 
 		// noturn is only permitted from official node
-		if header.Difficulty.Cmp(diffInTurn) != 0 && header.Coinbase != snap.POSAddress.OfficialNode {
+		if !isInturnDifficulty(header.Difficulty) && header.Coinbase != snap.SystemContracts.OfficialNode {
 			return errUnauthorizedSigner
 		}
 
 		// Begin slashing state update
-		if header.Difficulty.Cmp(diffInTurn) != 0 && header.Coinbase == snap.POSAddress.OfficialNode {
+		if !isInturnDifficulty(header.Difficulty) && header.Coinbase == snap.SystemContracts.OfficialNode {
 			log.Info("ℹ️  Commited by official node", "validator", header.Coinbase, "diff", header.Difficulty, "number", header.Number)
 			inturnSigner := snap.getInturnSigner(header.Number.Uint64())
 			log.Info("🗡️  Slashing validator", "signer", inturnSigner, "diff", header.Difficulty, "number", header.Number)
 			if err != nil {
 				panic(err)
 			}
-			err = c.slash(inturnSigner, state, header, cx, txs, receipts, systemTxs, usedGas, false, snap)
+			err = c.slash(inturnSigner, chain, state, header, cx, txs, receipts, systemTxs, usedGas, false, snap)
 			if err != nil {
 				panic(err)
 			}
@@ -953,7 +950,7 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 // nor block rewards given, and returns the final block.
 func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB,
 	txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, []*types.Receipt, error) {
-	if chain.Config().IsPoS(header.Number) {
+	if c.config.IsPoS(header.Number) {
 		snap, err := c.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil)
 		if err != nil {
 			panic(err)
@@ -965,20 +962,20 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 		if receipts == nil {
 			receipts = make([]*types.Receipt, 0)
 		}
-		if header.Number.Uint64()%span == (span/2)+1 {
+		if isSpanCommitmentBlock(c.config, header.Number) {
 			err := c.commitSpan(c.val, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true)
 			if err != nil {
 				panic(err)
 			}
 		}
 		// Begin slashing
-		if header.Difficulty.Cmp(diffInTurn) != 0 && header.Coinbase == snap.POSAddress.OfficialNode {
+		if !isInturnDifficulty(header.Difficulty) && header.Coinbase == snap.SystemContracts.OfficialNode {
 			inturnSigner := snap.getInturnSigner(header.Number.Uint64())
 			log.Info("🗡️  Slashing validator (FAA)", "signer", inturnSigner, "diff", header.Difficulty, "number", header.Number)
 			if err != nil {
 				panic(err)
 			}
-			err = c.slash(inturnSigner, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true, snap)
+			err = c.slash(inturnSigner, chain, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true, snap)
 			if err != nil {
 				panic(err)
 			}
@@ -998,7 +995,7 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 }
 
 // slash spoiled validators
-func (c *Clique) slash(spoiledVal common.Address, state *state.StateDB, header *types.Header, chain core.ChainContext,
+func (c *Clique) slash(spoiledVal common.Address, chain consensus.ChainHeaderReader, state *state.StateDB, header *types.Header, cx core.ChainContext,
 	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool, snap *Snapshot) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1007,10 +1004,20 @@ func (c *Clique) slash(spoiledVal common.Address, state *state.StateDB, header *
 	if err != nil {
 		return err
 	}
-	number := header.Number.Uint64()
-	if number%span == 0 {
+	if isSpanFirstBlock(c.config, header.Number) {
 		currentSpan = new(big.Int).Add(currentSpan, common.Big1)
 	}
+
+	slashed, err := c.isSlashed(chain, spoiledVal, currentSpan, header)
+
+	if err != nil {
+		return err
+	}
+	// ignore slash
+	if slashed {
+		return nil
+	}
+
 	// method
 	method := "slash"
 
@@ -1024,9 +1031,9 @@ func (c *Clique) slash(spoiledVal common.Address, state *state.StateDB, header *
 		return err
 	}
 	// get system message
-	msg := c.getSystemMessage(header.Coinbase, common.HexToAddress(snap.POSAddress.SlashManager.String()), data, common.Big0)
+	msg := c.getSystemMessage(header.Coinbase, common.HexToAddress(snap.SystemContracts.SlashManager.String()), data, common.Big0)
 	// apply message
-	return c.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
+	return c.applyTransaction(msg, state, header, cx, txs, receipts, receivedTxs, usedGas, mining)
 
 }
 
@@ -1085,7 +1092,7 @@ func (c *Clique) distributeToValidator(amount *big.Int, validator common.Address
 		return err
 	}
 	// get system message
-	msg := c.getSystemMessage(header.Coinbase, snap.POSAddress.StakeManager, data, amount)
+	msg := c.getSystemMessage(header.Coinbase, snap.SystemContracts.StakeManager, data, amount)
 	// apply message
 	return c.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
 }
@@ -1161,19 +1168,19 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	if err != nil {
 		return err
 	}
-	if !chain.Config().IsPoS(header.Number) {
+	if !c.config.IsPoS(header.Number) {
 		if _, authorized := snap.Signers[val]; !authorized {
 			return errUnauthorizedSigner
 		}
 	}
-	if chain.Config().IsPoS(header.Number) {
-		if _, authorized := snap.Signers[val]; !authorized && val != snap.POSAddress.OfficialNode {
+	if c.config.IsPoS(header.Number) {
+		if _, authorized := snap.Signers[val]; !authorized && val != snap.SystemContracts.OfficialNode {
 			return errUnauthorizedSigner
 		}
 	}
 
 	// If we're amongst the recent signers, wait for the next block
-	if !chain.Config().IsPoS(header.Number) {
+	if !c.config.IsPoS(header.Number) {
 		for seen, recent := range snap.Recents {
 			if recent == val {
 				// Signer is among recents, only wait if the current block doesn't shift it out
@@ -1192,8 +1199,8 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	// We propose the official validator node which operate by Bitkub Blockchain Technology Co., Ltd.
 	// 1. The super node will be the right validator node to seal the block incase of the inturn validator node does not propagate the block in time.
 	// The timing of delay, the official will operate to sealing the block and propagate after 1 sec of delay.
-	if !chain.Config().IsPoS(header.Number) {
-		if header.Difficulty.Cmp(diffNoTurn) == 0 {
+	if !c.config.IsPoS(header.Number) {
+		if isNoturnDifficulty(header.Difficulty) {
 			// It's not our turn explicitly to sign, delay it a bit
 			wiggle := time.Duration(len(snap.Signers)/2+1) * wiggleTime
 			delay += time.Duration(rand.Int63n(int64(wiggle)))
@@ -1201,7 +1208,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 			log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
 		}
 	} else {
-		if header.Difficulty.Cmp(diffNoTurn) == 0 {
+		if isNoturnDifficulty(header.Difficulty) {
 			delay += time.Duration(rand.Int63n(int64(wiggleTime)))
 		}
 		ctx := context.Background()
@@ -1210,8 +1217,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		if err != nil {
 			return err
 		}
-		number := header.Number.Uint64()
-		if number%span == 0 {
+		if isSpanFirstBlock(c.config, header.Number) {
 			currentSpan = new(big.Int).Add(currentSpan, common.Big1)
 		}
 		slashed, err = c.isSlashed(chain, inturnSigner, currentSpan, header)
@@ -1236,8 +1242,8 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 			return
 		case <-time.After(delay):
 		}
-		if chain.Config().IsPoS(header.Number) && (header.Difficulty.Cmp(diffInTurn) != 0 || slashed) {
-			defaultWaitTime := time.Duration(1)
+		if c.config.IsPoS(header.Number) && (!isInturnDifficulty(header.Difficulty) || slashed) {
+			defaultWaitTime := time.Duration(2)
 			if slashed {
 				defaultWaitTime = time.Duration(0)
 			}
@@ -1245,7 +1251,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 			case <-stop:
 				return
 			case <-time.After(defaultWaitTime * time.Second):
-				if val != snap.POSAddress.OfficialNode {
+				if val != snap.SystemContracts.OfficialNode {
 					<-stop
 					return
 				}
@@ -1327,7 +1333,7 @@ func (c *Clique) isSlashed(chain consensus.ChainHeaderReader, signer common.Addr
 
 	// call
 	msgData := (hexutil.Bytes)(data)
-	toAddress := snap.POSAddress.SlashManager
+	toAddress := snap.SystemContracts.SlashManager
 	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
 	result, err := c.ethAPI.Call(ctx, ethapi.TransactionArgs{
 		Gas:  &gas,
@@ -1345,7 +1351,7 @@ func (c *Clique) isSlashed(chain consensus.ChainHeaderReader, signer common.Addr
 	return out, nil
 }
 
-func (c *Clique) GetCurrentValidators(headerHash common.Hash, blockNumber *big.Int) ([]*Validator, *POSAddress, error) {
+func (c *Clique) GetCurrentValidators(headerHash common.Hash, blockNumber *big.Int) ([]*Validator, *SystemContracts, error) {
 	// block
 	blockNr := rpc.BlockNumberOrHashWithHash(headerHash, false)
 
@@ -1396,10 +1402,10 @@ func (c *Clique) GetCurrentValidators(headerHash common.Hash, blockNumber *big.I
 	for i, a := range *ret0 {
 		valz[i] = &Validator{
 			Address:     a,
-			VotingPower: (*ret1)[i].Int64(),
+			VotingPower: (*ret1)[i].Uint64(),
 		}
 	}
-	ca := &POSAddress{
+	ca := &SystemContracts{
 		StakeManager: (*ret2)[0],
 		SlashManager: (*ret2)[1],
 		OfficialNode: (*ret2)[2],
@@ -1464,7 +1470,7 @@ func (c *Clique) selectNextValidatorSet(parent *types.Header, seedBlock *types.H
 
 	weightedRanges, totalVotingPower := createWeightedRanges(votingPower)
 
-	for i := uint64(0); i < span; i++ {
+	for i := uint64(0); i < c.config.Clique.Span; i++ {
 		/*
 			random must be in [1, totalVotingPower] to avoid situation such as
 			2 validators with 1 staking power each.
@@ -1475,7 +1481,7 @@ func (c *Clique) selectNextValidatorSet(parent *types.Header, seedBlock *types.H
 		index := binarySearch(weightedRanges, targetWeight)
 		selectedProducers = append(selectedProducers, *newValidators[index])
 	}
-	return selectedProducers[:span], nil
+	return selectedProducers[:c.config.Clique.Span], nil
 }
 
 func binarySearch(array []uint64, search uint64) int {
@@ -1770,9 +1776,71 @@ func (c *Clique) GetEligibleValidators(headerHash common.Hash, blockNumber uint6
 		valz[i] = &Validator{
 			Address: a.Address,
 			// VotingPower: a.VotingPower.Int64(),
-			VotingPower: new(big.Int).Div(a.VotingPower, new(big.Int).SetInt64(int64(math.Pow(10, 18)))).Int64(),
+			VotingPower: new(big.Int).Div(a.VotingPower, new(big.Int).SetInt64(int64(math.Pow(10, 18)))).Uint64(),
 		}
 	}
 
 	return valz, nil
+}
+
+// Check whether the given block is in the first block of an epoch
+func isOnEpochStart(config *params.ChainConfig, number *big.Int) bool {
+	n := number.Uint64()
+	return n%config.Clique.Epoch == 0
+}
+
+// Check whether the next block of the given block is in proof-of-stake period.
+func isNextBlockPoS(config *params.ChainConfig, number *big.Int) bool {
+	return config.IsPoS(new(big.Int).Add(number, common.Big1))
+}
+
+// Check whether the given block is the commitment block (mid-span).
+func isSpanCommitmentBlock(config *params.ChainConfig, number *big.Int) bool {
+	bigSpan := new(big.Int).SetUint64(config.Clique.Span)
+
+	// number % span
+	mod := new(big.Int).Mod(number, bigSpan)
+	// span / 2 + 1
+	midSpan := new(big.Int).Div(bigSpan, common.Big2)
+	midSpan = midSpan.Add(midSpan, common.Big1)
+
+	// is pos && number % span = span / 2 + 1
+	return config.IsPoS(number) && mod.Cmp(midSpan) == 0
+}
+
+// Check whether the given block is the first block of the span.
+func isSpanFirstBlock(config *params.ChainConfig, number *big.Int) bool {
+	bigSpan := new(big.Int).SetUint64(config.Clique.Span)
+	mod := new(big.Int).Mod(number, bigSpan)
+	return config.IsPoS(number) && mod.Cmp(common.Big0) == 0
+}
+
+// Check whether the next block of the given block is the first block of the span.
+func isNextBlockASpanFirstBlock(config *params.ChainConfig, number *big.Int) bool {
+	bigSpan := new(big.Int).SetUint64(config.Clique.Span)
+	nextBlock := new(big.Int).Add(number, common.Big1)
+	// (number + 1) % span
+	mod := new(big.Int).Mod(nextBlock, bigSpan)
+	// is pos && (number + 1) % span == 0
+	return config.IsPoS(nextBlock) && mod.Cmp(common.Big0) == 0
+}
+
+// Check whether geth should update the validator list or not
+func needToUpdateValidatorList(config *params.ChainConfig, number *big.Int) bool {
+	return isNextBlockASpanFirstBlock(config, number) || isNextBlockExactPoSBlock(config, number)
+}
+
+func isNextBlockExactPoSBlock(config *params.ChainConfig, number *big.Int) bool {
+	nextBlock := new(big.Int).Add(number, common.Big1)
+	return config.IsPoS(nextBlock) && config.PoSBlock.Cmp(nextBlock) == 0
+}
+
+// Check whether the given difficulty is the inturn difficulty.
+func isInturnDifficulty(diff *big.Int) bool {
+	return diff.Cmp(diffInTurn) == 0
+}
+
+// Check whether the given difficulty is the noturn difficulty.
+func isNoturnDifficulty(diff *big.Int) bool {
+	return diff.Cmp(diffNoTurn) == 0
 }

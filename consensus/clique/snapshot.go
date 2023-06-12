@@ -32,7 +32,7 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 )
 
-type POSAddress struct {
+type SystemContracts struct {
 	StakeManager common.Address `json:"stakeManager"`
 	SlashManager common.Address `json:"slashManager"`
 	OfficialNode common.Address `json:"officialNode"`
@@ -60,14 +60,14 @@ type Snapshot struct {
 	config   *params.ChainConfig // Consensus engine parameters to fine tune behavior
 	sigcache *lru.ARCCache       // Cache of recent block signatures to speed up ecrecover
 
-	Number     uint64                      `json:"number"`     // Block number where the snapshot was created
-	Hash       common.Hash                 `json:"hash"`       // Block hash where the snapshot was created
-	Signers    map[common.Address]struct{} `json:"signers"`    // Set of authorized signers at this moment
-	Validators []common.Address            `json:"validators"` // Validator set at this moment
-	Recents    map[uint64]common.Address   `json:"recents"`    // Set of recent signers for spam protections
-	Votes      []*Vote                     `json:"votes"`      // List of votes cast in chronological order
-	Tally      map[common.Address]Tally    `json:"tally"`      // Current vote tally to avoid recalculating
-	POSAddress POSAddress                  `json:"posAddress"` // PoS consensus addresses storage
+	Number          uint64                      `json:"number"`          // Block number where the snapshot was created
+	Hash            common.Hash                 `json:"hash"`            // Block hash where the snapshot was created
+	Signers         map[common.Address]struct{} `json:"signers"`         // Set of authorized signers at this moment
+	Validators      []common.Address            `json:"validators"`      // Validator set at this moment
+	Recents         map[uint64]common.Address   `json:"recents"`         // Set of recent signers for spam protections
+	Votes           []*Vote                     `json:"votes"`           // List of votes cast in chronological order
+	Tally           map[common.Address]Tally    `json:"tally"`           // Current vote tally to avoid recalculating
+	SystemContracts SystemContracts             `json:"systemContracts"` // System contract addresses
 }
 
 // signersAscending implements the sort interface to allow sorting a list of addresses
@@ -127,16 +127,16 @@ func (s *Snapshot) store(db ethdb.Database) error {
 // copy creates a deep copy of the snapshot, though not the individual votes.
 func (s *Snapshot) copy() *Snapshot {
 	cpy := &Snapshot{
-		config:     s.config,
-		sigcache:   s.sigcache,
-		Number:     s.Number,
-		Hash:       s.Hash,
-		Signers:    make(map[common.Address]struct{}),
-		Validators: s.Validators,
-		POSAddress: s.POSAddress,
-		Recents:    make(map[uint64]common.Address),
-		Votes:      make([]*Vote, len(s.Votes)),
-		Tally:      make(map[common.Address]Tally),
+		config:          s.config,
+		sigcache:        s.sigcache,
+		Number:          s.Number,
+		Hash:            s.Hash,
+		Signers:         make(map[common.Address]struct{}),
+		Validators:      s.Validators,
+		SystemContracts: s.SystemContracts,
+		Recents:         make(map[uint64]common.Address),
+		Votes:           make([]*Vote, len(s.Votes)),
+		Tally:           make(map[common.Address]Tally),
 	}
 	for signer := range s.Signers {
 		cpy.Signers[signer] = struct{}{}
@@ -237,10 +237,10 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			return nil, err
 		}
 
-		if _, ok := snap.Signers[signer]; !ok && signer != snap.POSAddress.OfficialNode {
+		if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode {
 			return nil, errUnauthorizedSigner
 		}
-		if !s.config.IsPoS(new(big.Int).SetUint64(number)) {
+		if !s.config.IsPoS(header.Number) {
 			if _, ok := snap.Signers[signer]; !ok {
 				return nil, errUnauthorizedSigner
 			}
@@ -251,8 +251,8 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			}
 		}
 
-		if s.config.IsPoS(new(big.Int).SetUint64(number)) {
-			if _, ok := snap.Signers[signer]; !ok && signer != snap.POSAddress.OfficialNode {
+		if s.config.IsPoS(header.Number) {
+			if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode {
 				return nil, errUnauthorizedSigner
 			}
 		}
@@ -270,7 +270,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			return nil, errInvalidVote
 		}
 
-		if !s.config.IsPoS(new(big.Int).SetUint64(number)) {
+		if !s.config.IsPoS(header.Number) {
 			// Header authorized, discard any previous votes from the signer
 			voteAddr := s.getVoteAddr(header)
 			for i, vote := range snap.Votes {
@@ -327,8 +327,8 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			}
 		}
 
-		if s.config.IsPoS(new(big.Int).SetUint64(number + 1)) {
-			if number > 0 && (number+1)%span == 0 {
+		if isNextBlockPoS(s.config, header.Number) {
+			if number > 0 && needToUpdateValidatorList(s.config, header.Number) {
 				posBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
 				if len(posBytes) < contractBytesLength {
 					log.Error("posBytes error", "bytes", posBytes)
@@ -367,9 +367,9 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 
 				snap.Signers = newVals
 				snap.Validators = validators
-				snap.POSAddress.StakeManager = *contracts[0]
-				snap.POSAddress.SlashManager = *contracts[1]
-				snap.POSAddress.OfficialNode = *contracts[2]
+				snap.SystemContracts.StakeManager = *contracts[0]
+				snap.SystemContracts.SlashManager = *contracts[1]
+				snap.SystemContracts.OfficialNode = *contracts[2]
 			}
 		}
 		// If we're taking too much time (ecrecover), notify the user once a while
@@ -399,7 +399,8 @@ func (s *Snapshot) signers() []common.Address {
 
 // inturn returns if a signer at a given block height is in-turn or not.
 func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
-	if !s.config.IsPoS(new(big.Int).SetUint64(number)) {
+	bigNumber := new(big.Int).SetUint64(number)
+	if !s.config.IsPoS(bigNumber) {
 		signers, offset := s.signers(), 0
 		for offset < len(signers) && signers[offset] != signer {
 			offset++
