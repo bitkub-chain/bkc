@@ -328,7 +328,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 		}
 
 		if isNextBlockPoS(s.config, header.Number) {
-			if number > 0 && shouldUpdateValidatorList(s.config, header.Number) {
+			if number > 0 && needToUpdatValidatorList(s.config, header.Number) {
 				posBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
 				if len(posBytes) < contractBytesLength {
 					log.Error("posBytes error", "bytes", posBytes)
