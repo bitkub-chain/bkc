@@ -316,37 +316,6 @@ func (c *Clique) IsSystemTransaction(tx *types.Transaction, header *types.Header
 	return false, nil
 }
 
-func (c *Clique) GetSystemContracts(chain consensus.ChainHeaderReader, header *types.Header) (common.Address, error) {
-	blockNr := rpc.BlockNumberOrHashWithHash(header.ParentHash, false)
-
-	method := "stakeManager"
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // cancel when we are finished consuming integers
-
-	data, err := c.validatorSetABI.Pack(method)
-	if err != nil {
-		log.Error("Unable to pack tx for deposit", "error", err)
-		return common.Address{}, err
-	}
-
-	msgData := (hexutil.Bytes)(data)
-	toAddress := c.config.Clique.ValidatorContract
-	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
-	result, _ := c.ethAPI.Call(ctx, ethapi.TransactionArgs{
-		Gas:  &gas,
-		To:   &toAddress,
-		Data: &msgData,
-	}, blockNr, nil)
-
-	var ret0 = new(common.Address)
-
-	if err := c.validatorSetABI.UnpackIntoInterface(&ret0, method, result); err != nil {
-		return common.Address{}, err
-	}
-
-	return *ret0, nil
-}
-
 // Author implements consensus.Engine, returning the Ethereum address recovered
 // from the signature in the header's extra-data section.
 func (c *Clique) Author(header *types.Header) (common.Address, error) {
@@ -1084,9 +1053,7 @@ func (c *Clique) distributeToValidator(amount *big.Int, validator common.Address
 	method := "distributeReward"
 
 	// get packed data
-	data, err := c.stakeManagerABI.Pack(method,
-		validator,
-	)
+	data, err := c.stakeManagerABI.Pack(method)
 	if err != nil {
 		log.Error("Unable to pack tx for deposit", "error", err)
 		return err
