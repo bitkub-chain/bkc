@@ -775,10 +775,10 @@ func TestCliquePoSTransition(t *testing.T) {
 		valz_1 := make([]Validator, config.Clique.Span)
 		for v := 0; v < int(config.Clique.Span); v++ {
 			valz_1[v] = Validator{
-				Address:     accounts.address(tt.firstValidatorSet[v%len(signers)].address),
+				Address:     accounts.address(tt.firstValidatorSet[v%len(tt.firstValidatorSet)].address),
 				VotingPower: tt.firstValidatorSet[0].power,
 			}
-			tt.checkValidates = append(tt.checkValidates, accounts.address(tt.firstValidatorSet[v%len(signers)].address))
+			tt.checkValidates = append(tt.checkValidates, accounts.address(tt.firstValidatorSet[v%len(tt.firstValidatorSet)].address))
 		}
 
 		blocks, _ := core.GenerateChain(&config, genesis.ToBlock(db), engine, db, int(config.Clique.Span)-1, func(i int, block *core.BlockGen) {
@@ -813,9 +813,44 @@ func TestCliquePoSTransition(t *testing.T) {
 		}
 
 		chain, _ := core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil, nil)
-		chain.InsertChain(blocks)
+		_, err := chain.InsertChain(blocks)
+		if err != nil {
+			panic(err)
+		}
 
 		parent := chain.GetBlockByHash(chain.CurrentBlock().Hash())
+
+		engine.snapshot(chain, parent.Number().Uint64(), parent.Hash(), nil)
+
+		block50, _ := core.GenerateChain(&config, parent, engine, db, 1, func(i int, block *core.BlockGen) {})
+
+		chain, _ = core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil, nil)
+
+		for j, block := range block50 {
+			// Get the header and prepare it for signing
+			header := block.Header()
+			if j > 0 {
+				header.ParentHash = block50[j-1].Hash()
+			}
+
+			// Ensure the extra data has all its components
+			if len(header.Extra) < extraVanity {
+				header.Extra = append(header.Extra, bytes.Repeat([]byte{0x00}, extraVanity-len(header.Extra))...)
+			}
+			header.Extra = header.Extra[:extraVanity]
+			header.Extra = append(header.Extra, make([]byte, extraSeal)...)
+			header.Difficulty = diffInTurn
+
+			accounts.sign(header, tt.firstValidatorSet[j%int(config.Clique.Span)].address)
+			block50[j] = block.WithSeal(header)
+		}
+
+		_, err = chain.InsertChain(block50)
+		if err != nil {
+			panic(err)
+		}
+
+		parent = chain.GetBlockByHash(chain.CurrentBlock().Hash())
 
 		snap, _ := engine.snapshot(chain, parent.Number().Uint64(), parent.Hash(), nil)
 
