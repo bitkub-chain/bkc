@@ -25,18 +25,14 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/consensus/clique/ctypes"
+	"github.com/ethereum/go-ethereum/consensus/clique/utils"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	lru "github.com/hashicorp/golang-lru"
 )
-
-type SystemContracts struct {
-	StakeManager common.Address `json:"stakeManager"`
-	SlashManager common.Address `json:"slashManager"`
-	OfficialNode common.Address `json:"officialNode"`
-}
 
 // Vote represents a single vote that an authorized signer made to modify the
 // list of authorizations.
@@ -67,7 +63,7 @@ type Snapshot struct {
 	Recents         map[uint64]common.Address   `json:"recents"`         // Set of recent signers for spam protections
 	Votes           []*Vote                     `json:"votes"`           // List of votes cast in chronological order
 	Tally           map[common.Address]Tally    `json:"tally"`           // Current vote tally to avoid recalculating
-	SystemContracts SystemContracts             `json:"systemContracts"` // System contract addresses
+	SystemContracts ctypes.SystemContracts      `json:"systemContracts"` // System contract addresses
 }
 
 // signersAscending implements the sort interface to allow sorting a list of addresses
@@ -345,7 +341,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 					log.Error("some PoS contracts are missing", "require", totalPosContracts, "have", len(contracts), "contracts", contracts)
 				}
 				// get validators from headers and use that for new validator set
-				newValArr, err := ParseValidatorsAndPower(validatorBytes)
+				newValArr, err := utils.ParseValidatorsAndPower(validatorBytes)
 
 				if err != nil {
 					return nil, err

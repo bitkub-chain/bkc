@@ -1,4 +1,4 @@
-package clique
+package contract
 
 const stakeManageABI = `[
   {

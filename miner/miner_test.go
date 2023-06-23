@@ -24,6 +24,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/clique"
+	"github.com/ethereum/go-ethereum/consensus/clique/mock"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -33,6 +34,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb/memorydb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/trie"
+	"github.com/golang/mock/gomock"
 )
 
 type mockBackend struct {
@@ -254,8 +256,14 @@ func createMiner(t *testing.T) (*Miner, *event.TypeMux, func(skipMiner bool)) {
 	if err != nil {
 		t.Fatalf("can't create new chain config: %v", err)
 	}
+
+	mockCtl := gomock.NewController(t)
+	defer mockCtl.Finish()
+
+	mockContractClient := mock.NewMockContractClient(mockCtl)
+
 	// Create consensus engine
-	engine := clique.New(chainConfig, chainDB, nil)
+	engine := clique.New(chainConfig, chainDB, nil, mockContractClient)
 	// Create Ethereum backend
 	bc, err := core.NewBlockChain(chainDB, nil, chainConfig, engine, vm.Config{}, nil, nil)
 	if err != nil {

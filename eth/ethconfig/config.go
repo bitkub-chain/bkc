@@ -29,6 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/beacon"
 	"github.com/ethereum/go-ethereum/consensus/clique"
+	"github.com/ethereum/go-ethereum/consensus/clique/contract"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/eth/downloader"
@@ -216,7 +217,12 @@ func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, co
 	// If proof-of-authority is requested, set it up
 	var engine consensus.Engine
 	if chainConfig.Clique != nil {
-		return clique.New(chainConfig, db, ee)
+		// create contract client and use with clique
+		client, err := contract.New(chainConfig, ee)
+		if err != nil {
+			panic(err)
+		}
+		return clique.New(chainConfig, db, ee, client)
 	} else {
 		switch config.PowMode {
 		case ethash.ModeFake:
