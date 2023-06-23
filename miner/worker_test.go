@@ -18,6 +18,7 @@ package miner
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
 	"math/rand"
 	"sync/atomic"
@@ -28,6 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/clique"
+	"github.com/ethereum/go-ethereum/consensus/clique/mock"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -38,6 +40,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/golang/mock/gomock"
 )
 
 const (
@@ -199,6 +202,22 @@ func (b *testWorkerBackend) newRandomTx(creation bool) *types.Transaction {
 	return tx
 }
 
+func newMockContractClient(t *testing.T) *mock.MockContractClient {
+	mockCtl := gomock.NewController(t)
+	defer mockCtl.Finish()
+
+	mockContractClient := mock.NewMockContractClient(mockCtl)
+	mockContractClient.EXPECT().CommitSpan(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	mockContractClient.EXPECT().DistributeToValidator(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	mockContractClient.EXPECT().GetCurrentSpan(gomock.Any(), gomock.Any()).AnyTimes()
+	mockContractClient.EXPECT().GetCurrentValidators(gomock.Any(), gomock.Any()).AnyTimes()
+	mockContractClient.EXPECT().GetEligibleValidators(gomock.Any(), gomock.Any()).AnyTimes()
+	mockContractClient.EXPECT().Inject(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	mockContractClient.EXPECT().IsSlashed(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	mockContractClient.EXPECT().Slash(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	return mockContractClient
+}
+
 func newTestWorker(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine, db ethdb.Database, blocks int) (*worker, *testWorkerBackend) {
 	backend := newTestWorkerBackend(t, chainConfig, engine, db, blocks)
 	backend.txPool.AddLocals(pendingTxs)
@@ -216,6 +235,7 @@ func TestGenerateBlockAndImportClique(t *testing.T) {
 }
 
 func testGenerateBlockAndImport(t *testing.T, isClique bool) {
+	t.Helper()
 	var (
 		engine      consensus.Engine
 		chainConfig *params.ChainConfig
@@ -224,7 +244,9 @@ func testGenerateBlockAndImport(t *testing.T, isClique bool) {
 	if isClique {
 		chainConfig = params.AllCliqueProtocolChanges
 		chainConfig.Clique = &params.CliqueConfig{Period: 1, Epoch: 30000}
-		engine = clique.New(chainConfig, db, nil)
+
+		mockContractClient := newMockContractClient(t)
+		engine = clique.New(chainConfig, db, nil, mockContractClient)
 	} else {
 		chainConfig = params.AllEthashProtocolChanges
 		engine = ethash.NewFaker()
@@ -274,10 +296,13 @@ func TestEmptyWorkEthash(t *testing.T) {
 	testEmptyWork(t, ethashChainConfig, ethash.NewFaker())
 }
 func TestEmptyWorkClique(t *testing.T) {
-	testEmptyWork(t, cliqueChainConfig, clique.New(cliqueChainConfig, rawdb.NewMemoryDatabase(), nil))
+
+	mockContractClient := newMockContractClient(t)
+	testEmptyWork(t, cliqueChainConfig, clique.New(cliqueChainConfig, rawdb.NewMemoryDatabase(), nil, mockContractClient))
 }
 
 func testEmptyWork(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine) {
+	t.Helper()
 	defer engine.Close()
 
 	w, _ := newTestWorker(t, chainConfig, engine, rawdb.NewMemoryDatabase(), 0)
@@ -378,10 +403,13 @@ func TestRegenerateMiningBlockEthash(t *testing.T) {
 }
 
 func TestRegenerateMiningBlockClique(t *testing.T) {
-	testRegenerateMiningBlock(t, cliqueChainConfig, clique.New(cliqueChainConfig, rawdb.NewMemoryDatabase(), nil))
+
+	mockContractClient := newMockContractClient(t)
+	testRegenerateMiningBlock(t, cliqueChainConfig, clique.New(cliqueChainConfig, rawdb.NewMemoryDatabase(), nil, mockContractClient))
 }
 
 func testRegenerateMiningBlock(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine) {
+	t.Helper()
 	defer engine.Close()
 
 	w, b := newTestWorker(t, chainConfig, engine, rawdb.NewMemoryDatabase(), 0)
@@ -438,10 +466,13 @@ func TestAdjustIntervalEthash(t *testing.T) {
 }
 
 func TestAdjustIntervalClique(t *testing.T) {
-	testAdjustInterval(t, cliqueChainConfig, clique.New(cliqueChainConfig, rawdb.NewMemoryDatabase(), nil))
+
+	mockContractClient := newMockContractClient(t)
+	testAdjustInterval(t, cliqueChainConfig, clique.New(cliqueChainConfig, rawdb.NewMemoryDatabase(), nil, mockContractClient))
 }
 
 func testAdjustInterval(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine) {
+	t.Helper()
 	defer engine.Close()
 
 	w, _ := newTestWorker(t, chainConfig, engine, rawdb.NewMemoryDatabase(), 0)
@@ -533,7 +564,8 @@ func TestGetSealingWorkEthash(t *testing.T) {
 
 func TestGetSealingWorkClique(t *testing.T) {
 	cliqueChainConfig.ErawanBlock = nil
-	testGetSealingWork(t, cliqueChainConfig, clique.New(cliqueChainConfig, rawdb.NewMemoryDatabase(), nil), false)
+	mockContractClient := newMockContractClient(t)
+	testGetSealingWork(t, cliqueChainConfig, clique.New(cliqueChainConfig, rawdb.NewMemoryDatabase(), nil, mockContractClient), false)
 }
 
 func TestGetSealingWorkPostMerge(t *testing.T) {
@@ -544,6 +576,7 @@ func TestGetSealingWorkPostMerge(t *testing.T) {
 }
 
 func testGetSealingWork(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine, postMerge bool) {
+	t.Helper()
 	defer engine.Close()
 
 	w, b := newTestWorker(t, chainConfig, engine, rawdb.NewMemoryDatabase(), 0)
@@ -578,6 +611,7 @@ func testGetSealingWork(t *testing.T, chainConfig *params.ChainConfig, engine co
 			}
 		} else {
 			if block.Coinbase() != (common.Address{}) {
+				fmt.Println(block.Coinbase())
 				t.Error("Unexpected coinbase")
 			}
 		}

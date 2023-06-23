@@ -24,12 +24,15 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/clique/ctypes"
+	"github.com/ethereum/go-ethereum/consensus/clique/mock"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/golang/mock/gomock"
 )
 
 // testerAccountPool is a pool to maintain currently active tester accounts,
@@ -411,7 +414,13 @@ func TestClique(t *testing.T) {
 			Period: 1,
 			Epoch:  tt.epoch,
 		}
-		engine := New(&config, db, nil)
+		mockCtl := gomock.NewController(t)
+		defer mockCtl.Finish()
+
+		mockContractClient := mock.NewMockContractClient(mockCtl)
+		mockContractClient.EXPECT().SetSigner(gomock.Any()).Times(1)
+		engine := New(&config, db, nil, mockContractClient)
+
 		engine.fakeDiff = true
 
 		blocks, _ := core.GenerateChain(&config, genesis.ToBlock(db), engine, db, len(tt.votes), func(j int, gen *core.BlockGen) {
@@ -602,7 +611,13 @@ func TestCliqueErawanTransition(t *testing.T) {
 			Period: 1,
 			Epoch:  tt.epoch,
 		}
-		engine := New(&config, db, nil)
+
+		mockCtl := gomock.NewController(t)
+		defer mockCtl.Finish()
+
+		mockContractClient := mock.NewMockContractClient(mockCtl)
+		mockContractClient.EXPECT().SetSigner(gomock.Any()).Times(1)
+		engine := New(&config, db, nil, mockContractClient)
 		engine.fakeDiff = true
 
 		blocks, _ := core.GenerateChain(&config, genesis.ToBlock(db), engine, db, len(tt.votes), func(j int, gen *core.BlockGen) {
@@ -769,12 +784,17 @@ func TestCliquePoSTransition(t *testing.T) {
 			Span:   50,
 			Epoch:  300,
 		}
-		engine := New(&config, db, nil)
+		mockCtl := gomock.NewController(t)
+		defer mockCtl.Finish()
+
+		mockContractClient := mock.NewMockContractClient(mockCtl)
+		mockContractClient.EXPECT().SetSigner(gomock.Any()).Times(1)
+		engine := New(&config, db, nil, mockContractClient)
 		engine.fakeDiff = true
 
-		valz_1 := make([]Validator, config.Clique.Span)
+		valz_1 := make([]ctypes.Validator, config.Clique.Span)
 		for v := 0; v < int(config.Clique.Span); v++ {
-			valz_1[v] = Validator{
+			valz_1[v] = ctypes.Validator{
 				Address:     accounts.address(tt.firstValidatorSet[v%len(tt.firstValidatorSet)].address),
 				VotingPower: tt.firstValidatorSet[0].power,
 			}
