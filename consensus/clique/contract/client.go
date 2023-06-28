@@ -75,10 +75,7 @@ func (cc *ContractClient) Inject(val common.Address, signTxFn ctypes.SignerTxFn)
 
 func (cc *ContractClient) Slash(contract common.Address, spoiledVal common.Address, chain consensus.ChainHeaderReader, state *state.StateDB, header *types.Header, cx core.ChainContext,
 	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool, currentSpan *big.Int) error {
-
-	// method
 	method := "slash"
-
 	// get packed data
 	data, err := cc.slashManagerABI.Pack(method,
 		spoiledVal,
@@ -97,7 +94,7 @@ func (cc *ContractClient) Slash(contract common.Address, spoiledVal common.Addre
 func (cc *ContractClient) GetCurrentSpan(ctx context.Context, header *types.Header) (*big.Int, error) {
 	blockNr := rpc.BlockNumberOrHashWithHash(header.ParentHash, false)
 	method := "currentSpanNumber"
-
+	// get packed data
 	data, err := cc.validatorSetABI.Pack(method)
 	if err != nil {
 		log.Error("Unable to pack tx for deposit", "error", err)
@@ -107,11 +104,14 @@ func (cc *ContractClient) GetCurrentSpan(ctx context.Context, header *types.Head
 	msgData := (hexutil.Bytes)(data)
 	toAddress := cc.config.Clique.ValidatorContract
 	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
-	result, _ := cc.ethAPI.Call(ctx, ethapi.TransactionArgs{
+	result, err := cc.ethAPI.Call(ctx, ethapi.TransactionArgs{
 		Gas:  &gas,
 		To:   &toAddress,
 		Data: &msgData,
 	}, blockNr, nil)
+	if err != nil {
+		return nil, err
+	}
 
 	var ret0 *big.Int
 	if err := cc.validatorSetABI.UnpackIntoInterface(&ret0, method, result); err != nil {
@@ -123,9 +123,7 @@ func (cc *ContractClient) GetCurrentSpan(ctx context.Context, header *types.Head
 func (cc *ContractClient) DistributeToValidator(contract common.Address, amount *big.Int, validator common.Address,
 	state *state.StateDB, header *types.Header, chain core.ChainContext,
 	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error {
-	// method
 	method := "distributeReward"
-
 	// get packed data
 	data, err := cc.stakeManagerABI.Pack(method)
 	if err != nil {
@@ -140,7 +138,6 @@ func (cc *ContractClient) DistributeToValidator(contract common.Address, amount 
 
 func (cc *ContractClient) CommitSpan(val common.Address, state *state.StateDB, header *types.Header, chain core.ChainContext,
 	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool, validatorBytes []byte) error {
-
 	method := "commitSpan"
 	// get packed data
 	data, err := cc.validatorSetABI.Pack(method,
@@ -164,6 +161,7 @@ func (cc *ContractClient) IsSlashed(contract common.Address, chain consensus.Cha
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel() // cancel when we are finished consuming integers
 
+	// get packed data
 	data, err := cc.slashManagerABI.Pack(
 		method,
 		signer,
@@ -185,8 +183,7 @@ func (cc *ContractClient) IsSlashed(contract common.Address, chain consensus.Cha
 		Data: &msgData,
 	}, blockNr, nil)
 	if err != nil {
-		panic(err)
-		// return nil, err
+		return false, err
 	}
 	var out bool
 	if err := cc.slashManagerABI.UnpackIntoInterface(&out, method, result); err != nil {
@@ -199,12 +196,12 @@ func (cc *ContractClient) GetCurrentValidators(headerHash common.Hash, blockNumb
 	// block
 	blockNr := rpc.BlockNumberOrHashWithHash(headerHash, false)
 
-	// method
 	method := "getValidators"
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel() // cancel when we are finished consuming integers
 
+	// get packed data
 	data, err := cc.validatorSetABI.Pack(
 		method,
 		blockNumber,
@@ -223,8 +220,7 @@ func (cc *ContractClient) GetCurrentValidators(headerHash common.Hash, blockNumb
 		Data: &msgData,
 	}, blockNr, nil)
 	if err != nil {
-		panic(err)
-		// return nil, err
+		return nil, nil, err
 	}
 
 	var (
@@ -259,15 +255,14 @@ func (cc *ContractClient) GetCurrentValidators(headerHash common.Hash, blockNumb
 
 // GetCurrentValidators get current validators
 func (cc *ContractClient) GetEligibleValidators(headerHash common.Hash, blockNumber uint64) ([]*ctypes.Validator, error) {
-	// block
 	blockNr := rpc.BlockNumberOrHashWithHash(headerHash, false)
 
-	// method
 	method := "getEligibleValidators"
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// get packed data
 	data, err := cc.validatorSetABI.Pack(
 		method,
 	)
@@ -286,7 +281,7 @@ func (cc *ContractClient) GetEligibleValidators(headerHash common.Hash, blockNum
 		Data: &msgData,
 	}, blockNr, nil)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	var ret0 = new([]struct {
