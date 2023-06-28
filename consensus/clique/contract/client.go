@@ -31,7 +31,7 @@ type ContractClient struct {
 	stakeManagerABI abi.ABI
 	slashManagerABI abi.ABI
 	validatorSetABI abi.ABI
-	config          *params.ChainConfig
+	config          *params.ChainConfig // Consensus engine configuration parameters
 	signer          types.Signer
 	val             common.Address
 	signTxFn        ctypes.SignerTxFn
@@ -110,7 +110,7 @@ func (cc *ContractClient) GetCurrentSpan(ctx context.Context, header *types.Head
 		Data: &msgData,
 	}, blockNr, nil)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	var ret0 *big.Int
@@ -159,7 +159,7 @@ func (cc *ContractClient) IsSlashed(contract common.Address, chain consensus.Cha
 	method := "isSignerSlashed"
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	defer cancel() // cancel when we are finished consuming integers
 
 	// get packed data
 	data, err := cc.slashManagerABI.Pack(
@@ -183,7 +183,7 @@ func (cc *ContractClient) IsSlashed(contract common.Address, chain consensus.Cha
 		Data: &msgData,
 	}, blockNr, nil)
 	if err != nil {
-		panic(err)
+		return false, err
 	}
 	var out bool
 	if err := cc.slashManagerABI.UnpackIntoInterface(&out, method, result); err != nil {
@@ -199,7 +199,7 @@ func (cc *ContractClient) GetCurrentValidators(headerHash common.Hash, blockNumb
 	method := "getValidators"
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	defer cancel() // cancel when we are finished consuming integers
 
 	// get packed data
 	data, err := cc.validatorSetABI.Pack(
@@ -220,7 +220,7 @@ func (cc *ContractClient) GetCurrentValidators(headerHash common.Hash, blockNumb
 		Data: &msgData,
 	}, blockNr, nil)
 	if err != nil {
-		panic(err)
+		return nil, nil, err
 	}
 
 	var (
@@ -281,7 +281,7 @@ func (cc *ContractClient) GetEligibleValidators(headerHash common.Hash, blockNum
 		Data: &msgData,
 	}, blockNr, nil)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	var ret0 = new([]struct {
