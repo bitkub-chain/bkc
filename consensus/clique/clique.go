@@ -770,15 +770,9 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 		}
 
 		cx := chainContext{Chain: chain, clique: c}
-		val := header.Coinbase
-		if systemTxs != nil {
-			if isSpanCommitmentBlock(c.config, header.Number) {
-				err := c.commitSpan(c.val, state, header, cx, txs, receipts, systemTxs, usedGas, false)
-				if err != nil {
-					return errInvalidSpan
-				}
-			}
-			err := c.distributeIncoming(val, state, header, cx, txs, receipts, systemTxs, usedGas, false, snap)
+
+		if isSpanCommitmentBlock(c.config, header.Number) {
+			err := c.commitSpan(c.val, state, header, cx, txs, receipts, systemTxs, usedGas, false)
 			if err != nil {
 				panic(err)
 			}
@@ -802,6 +796,16 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 				panic(err)
 			}
 		}
+
+		val := header.Coinbase
+		err = c.distributeIncoming(val, state, header, cx, txs, receipts, systemTxs, usedGas, false, snap)
+		if err != nil {
+			panic(err)
+		}
+		if len(*systemTxs) > 0 {
+			return errors.New("the length of systemTxs do not match")
+		}
+
 	}
 	header.Root = state.IntermediateRoot(chain.Config().IsEIP158(header.Number))
 	header.UncleHash = types.CalcUncleHash(nil)
