@@ -774,7 +774,7 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 		if isSpanCommitmentBlock(c.config, header.Number) {
 			err := c.commitSpan(c.val, state, header, cx, txs, receipts, systemTxs, usedGas, false)
 			if err != nil {
-				panic(err)
+				return errInvalidSpan
 			}
 		}
 
@@ -788,19 +788,16 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 			log.Info("ℹ️  Commited by official node", "validator", header.Coinbase, "diff", header.Difficulty, "number", header.Number)
 			inturnSigner := snap.getInturnSigner(header.Number.Uint64())
 			log.Info("🗡️  Slashing validator", "signer", inturnSigner, "diff", header.Difficulty, "number", header.Number)
-			if err != nil {
-				panic(err)
-			}
 			err = c.slash(inturnSigner, chain, state, header, cx, txs, receipts, systemTxs, usedGas, false, snap)
 			if err != nil {
-				panic(err)
+				return err
 			}
 		}
 
 		val := header.Coinbase
 		err = c.distributeIncoming(val, state, header, cx, txs, receipts, systemTxs, usedGas, false, snap)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		if len(*systemTxs) > 0 {
 			return errors.New("the length of systemTxs do not match")
@@ -832,25 +829,22 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 		if isSpanCommitmentBlock(c.config, header.Number) {
 			err := c.commitSpan(c.val, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true)
 			if err != nil {
-				panic(err)
+				return nil, nil, errInvalidSpan
 			}
 		}
 		// Begin slashing
 		if !isInturnDifficulty(header.Difficulty) && header.Coinbase == snap.SystemContracts.OfficialNode {
 			inturnSigner := snap.getInturnSigner(header.Number.Uint64())
 			log.Info("🗡️  Slashing validator (FAA)", "signer", inturnSigner, "diff", header.Difficulty, "number", header.Number)
-			if err != nil {
-				panic(err)
-			}
 			err = c.slash(inturnSigner, chain, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true, snap)
 			if err != nil {
-				panic(err)
+				return nil, nil, err
 			}
 
 		}
 		err = c.distributeIncoming(c.val, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true, snap)
 		if err != nil {
-			panic(err)
+			return nil, nil, err
 		}
 
 	}
@@ -1015,7 +1009,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		}
 		slashed, err = c.contractClient.IsSlashed(snap.SystemContracts.SlashManager, chain, inturnSigner, currentSpan, header)
 		if err != nil {
-			panic(err)
+			return err
 		}
 	}
 
