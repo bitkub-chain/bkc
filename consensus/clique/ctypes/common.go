@@ -22,7 +22,6 @@ type SystemContracts struct {
 type Validator struct {
 	Address     common.Address `json:"signer"`
 	VotingPower uint64         `json:"power"`
-	// ProposerPriority int64          `json:"accum"`
 }
 
 // MinimalVal is the minimal validator representation

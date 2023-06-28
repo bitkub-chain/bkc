@@ -52,11 +52,7 @@ func ParseValidators(validatorsBytes []byte) ([]common.Address, error) {
 	result := make([]common.Address, len(validatorsBytes)/40)
 	for i := 0; i < len(validatorsBytes); i += 40 {
 		address := make([]byte, 20)
-		// power := make([]byte, 20)
-
 		copy(address, validatorsBytes[i:i+20])
-		// copy(power, validatorsBytes[i+20:i+40])
-
 		result[i/40] = common.BytesToAddress(address)
 	}
 
