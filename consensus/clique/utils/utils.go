@@ -7,7 +7,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/clique/ctypes"
-	"github.com/ethereum/go-ethereum/log"
 )
 
 // NewValidator creates new validator
@@ -40,7 +39,6 @@ func ParseValidatorsAndPower(validatorsBytes []byte) ([]*ctypes.Validator, error
 
 		result[i/40] = NewValidator(common.BytesToAddress(address), big.NewInt(0).SetBytes(power).Uint64())
 	}
-	log.Info("validators from extra", "result", result)
 	return result, nil
 }
 

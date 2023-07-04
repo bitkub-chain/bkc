@@ -727,7 +727,6 @@ func ParseAddressBytes(b []byte) ([]*common.Address, error) {
 		addr := common.BytesToAddress(address)
 		result[i/20] = &addr
 	}
-	log.Info("validators from extra", "result", result)
 	return result, nil
 }
 
@@ -785,9 +784,9 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 
 		// Begin slashing state update
 		if !isInturnDifficulty(header.Difficulty) && header.Coinbase == snap.SystemContracts.OfficialNode {
-			log.Info("ℹ️  Commited by official node", "validator", header.Coinbase, "diff", header.Difficulty, "number", header.Number)
+			log.Debug("ℹ️  Commited by official node", "validator", header.Coinbase, "diff", header.Difficulty, "number", header.Number)
 			inturnSigner := snap.getInturnSigner(header.Number.Uint64())
-			log.Info("🗡️  Slashing validator", "signer", inturnSigner, "diff", header.Difficulty, "number", header.Number)
+			log.Debug("🗡️  Slashing validator", "signer", inturnSigner, "diff", header.Difficulty, "number", header.Number)
 			err = c.slash(inturnSigner, chain, state, header, cx, txs, receipts, systemTxs, usedGas, false, snap)
 			if err != nil {
 				return err
@@ -835,7 +834,7 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 		// Begin slashing
 		if !isInturnDifficulty(header.Difficulty) && header.Coinbase == snap.SystemContracts.OfficialNode {
 			inturnSigner := snap.getInturnSigner(header.Number.Uint64())
-			log.Info("🗡️  Slashing validator (FAA)", "signer", inturnSigner, "diff", header.Difficulty, "number", header.Number)
+			log.Debug("🗡️  Slashing validator (FAA)", "signer", inturnSigner, "diff", header.Difficulty, "number", header.Number)
 			err = c.slash(inturnSigner, chain, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true, snap)
 			if err != nil {
 				return nil, nil, err
@@ -893,7 +892,7 @@ func (c *Clique) distributeIncoming(val common.Address, state *state.StateDB, he
 	state.SetBalance(consensus.SystemAddress, big.NewInt(0))
 	state.AddBalance(coinbase, balance)
 
-	log.Info("distribute to validator contract", "block hash", header.Hash(), "amount", balance)
+	log.Debug("distribute to validator contract", "block hash", header.Hash(), "amount", balance)
 	return c.contractClient.DistributeToValidator(snap.SystemContracts.StakeManager, balance, val, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
 }
 
