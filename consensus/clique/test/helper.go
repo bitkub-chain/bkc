@@ -26,11 +26,11 @@ var (
 func NewDefaultConfig() *params.ChainConfig {
 
 	var (
-		posBlock uint64 = 50
+		chaophrayaBlock uint64 = 50
 	)
 	c := params.AllCliqueProtocolChanges
 	c.Clique.Span = 50
-	c.PoSBlock = new(big.Int).SetUint64(posBlock)
+	c.ChaophrayaBlock = new(big.Int).SetUint64(chaophrayaBlock)
 	c.BerlinBlock = nil
 	c.LondonBlock = nil
 	c.MuirGlacierBlock = nil

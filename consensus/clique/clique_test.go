@@ -149,7 +149,7 @@ func TestCommitSpan(t *testing.T) {
 		seedBlockNumber        = 71
 		accountRegistry        = test.NewAccountRegistry() // Account Registry is used for storing account keys
 	)
-	var posBlock uint64
+	var chaophrayaBlock uint64
 	var spanSize uint64
 
 	// create coinbase account from string label
@@ -172,8 +172,8 @@ func TestCommitSpan(t *testing.T) {
 	// Load genesis from json file
 	genspec := test.NewDefaultGenesis()
 
-	// Set posBlock from config
-	posBlock = genspec.Config.PoSBlock.Uint64()
+	// Set chaophrayaBlock from config
+	chaophrayaBlock = genspec.Config.ChaophrayaBlock.Uint64()
 
 	// Set spanSize from config
 	spanSize = genspec.Config.Clique.Span
@@ -207,13 +207,13 @@ func TestCommitSpan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Roll to number posBlock - 2
+	// Roll to number chaophrayaBlock - 2
 	err = testChain.Roll(t, setPoSValidatorAtBlock-1)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Prepare POS (posBlock - 1)
+	// Prepare POS (chaophrayaBlock - 1)
 
 	var signers []*ctypes.Validator
 	s0 := &ctypes.Validator{
@@ -246,7 +246,7 @@ func TestCommitSpan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Begin POS (posBlock)
+	// Begin POS (chaophrayaBlock)
 
 	// Roll to get the seed block
 	err = testChain.Roll(t, seedBlockNumber)
@@ -276,7 +276,7 @@ func TestCommitSpan(t *testing.T) {
 	).Return(nil).Times(2)
 
 	// commit span block
-	commitSpanBlock := int(posBlock + (spanSize/2 + 1))
+	commitSpanBlock := int(chaophrayaBlock + (spanSize/2 + 1))
 	err = testChain.Roll(t, commitSpanBlock)
 	if err != nil {
 		t.Fatal(err)
@@ -341,13 +341,13 @@ func TestCommitSpan_NoEligibleValidator(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Roll to number posBlock - 2
+	// Roll to number chaophrayaBlock - 2
 	err = testChain.Roll(t, setPoSValidatorAtBlock-1)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Prepare POS (posBlock - 1)
+	// Prepare POS (chaophrayaBlock - 1)
 
 	var signers []*ctypes.Validator
 	s0 := &ctypes.Validator{
@@ -391,7 +391,7 @@ func TestSlashing_Call(t *testing.T) {
 	var (
 		accountRegistry = test.NewAccountRegistry() // Account Registry is used for storing account keys
 	)
-	var posBlock uint64
+	var chaophrayaBlock uint64
 
 	// create coinbase account from string label
 	accountRegistry.Add("coinbase")
@@ -421,8 +421,8 @@ func TestSlashing_Call(t *testing.T) {
 	// Load genesis from json file
 	genspec := test.NewDefaultGenesis()
 
-	// Set posBlock from config
-	posBlock = genspec.Config.PoSBlock.Uint64()
+	// Set chaophrayaBlock from config
+	chaophrayaBlock = genspec.Config.ChaophrayaBlock.Uint64()
 
 	// Set coinbase address
 	genspec.ExtraData = make([]byte, extraVanity+common.AddressLength+extraSeal)
@@ -452,8 +452,8 @@ func TestSlashing_Call(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Roll to number posBlock - 2
-	err = testChain.Roll(t, int(posBlock-2))
+	// Roll to number chaophrayaBlock - 2
+	err = testChain.Roll(t, int(chaophrayaBlock-2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -483,7 +483,7 @@ func TestSlashing_Call(t *testing.T) {
 		gomock.Any(),
 	).Return(getCurrentValidatorsReturns...).Times(1)
 
-	err = testChain.Roll(t, int(posBlock-1))
+	err = testChain.Roll(t, int(chaophrayaBlock-1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -498,7 +498,7 @@ func TestSlashing_Call(t *testing.T) {
 	testHeader := &types.Header{
 		Difficulty: diffNoTurn,
 		Coinbase:   officialNode.Address,
-		Number:     new(big.Int).SetUint64(posBlock),
+		Number:     new(big.Int).SetUint64(chaophrayaBlock),
 		ParentHash: testChain.Chain.CurrentHeader().Hash(),
 	}
 
@@ -548,7 +548,7 @@ func TestSlashing_ShouldNotBeCalledWhenSlashed(t *testing.T) {
 	var (
 		accountRegistry = test.NewAccountRegistry() // Account Registry is used for storing account keys
 	)
-	var posBlock uint64
+	var chaophrayaBlock uint64
 
 	// create coinbase account from string label
 	accountRegistry.Add("coinbase")
@@ -578,8 +578,8 @@ func TestSlashing_ShouldNotBeCalledWhenSlashed(t *testing.T) {
 	// Load genesis from json file
 	genspec := test.NewDefaultGenesis()
 
-	// Set posBlock from config
-	posBlock = genspec.Config.PoSBlock.Uint64()
+	// Set chaophrayaBlock from config
+	chaophrayaBlock = genspec.Config.ChaophrayaBlock.Uint64()
 
 	// Set coinbase address
 	genspec.ExtraData = make([]byte, extraVanity+common.AddressLength+extraSeal)
@@ -609,8 +609,8 @@ func TestSlashing_ShouldNotBeCalledWhenSlashed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Roll to number posBlock - 2
-	err = testChain.Roll(t, int(posBlock-2))
+	// Roll to number chaophrayaBlock - 2
+	err = testChain.Roll(t, int(chaophrayaBlock-2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -640,7 +640,7 @@ func TestSlashing_ShouldNotBeCalledWhenSlashed(t *testing.T) {
 		gomock.Any(),
 	).Return(getCurrentValidatorsReturns...).Times(1)
 
-	err = testChain.Roll(t, int(posBlock-1))
+	err = testChain.Roll(t, int(chaophrayaBlock-1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -655,7 +655,7 @@ func TestSlashing_ShouldNotBeCalledWhenSlashed(t *testing.T) {
 	testHeader := &types.Header{
 		Difficulty: diffNoTurn,
 		Coinbase:   officialNode.Address,
-		Number:     new(big.Int).SetUint64(posBlock),
+		Number:     new(big.Int).SetUint64(chaophrayaBlock),
 		ParentHash: testChain.Chain.CurrentHeader().Hash(),
 	}
 
@@ -728,7 +728,7 @@ func TestDistributeReward(t *testing.T) {
 	// Assemble a chain of headers from the cast votes
 	config := *params.TestChainConfig
 	config.ErawanBlock = common.Big0
-	config.PoSBlock = big.NewInt(50)
+	config.ChaophrayaBlock = big.NewInt(50)
 	config.MuirGlacierBlock = nil
 	config.BerlinBlock = nil
 	config.LondonBlock = nil
@@ -908,13 +908,13 @@ func TestRandomValidator(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Roll to number posBlock - 2
+	// Roll to number chaophrayaBlock - 2
 	err = testChain.Roll(t, setPoSValidatorAtBlock-1)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Prepare POS (posBlock - 1)
+	// Prepare POS (chaophrayaBlock - 1)
 
 	signers := []*ctypes.Validator{
 		{

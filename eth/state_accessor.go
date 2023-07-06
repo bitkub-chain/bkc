@@ -192,7 +192,7 @@ func (eth *Ethereum) stateAtTransaction(block *types.Block, txIndex int, reexec 
 		}
 		// Not yet the searched for transaction, execute on top of the current state
 		vmenv := vm.NewEVM(context, txContext, statedb, eth.blockchain.Config(), vm.Config{})
-		if eth.blockchain.Config().PoSBlock != nil && eth.blockchain.Config().IsPoS(block.Header().Number) {
+		if eth.blockchain.Config().ChaophrayaBlock != nil && eth.blockchain.Config().IsChaophraya(block.Header().Number) {
 			posa, _ := eth.Engine().(consensus.PoSA)
 			isSystem, _ := posa.IsSystemTransaction(tx, block.Header(), eth.BlockChain())
 			if msg.From() == context.Coinbase && isSystem {

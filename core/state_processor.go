@@ -84,7 +84,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	systemTxs := make([]*types.Transaction, 0)
 
 	for i, tx := range block.Transactions() {
-		if p.config.PoSBlock != nil && p.config.IsPoS(blockNumber) {
+		if p.config.ChaophrayaBlock != nil && p.config.IsChaophraya(blockNumber) {
 			isSystemTx, _ := posa.IsSystemTransaction(tx, block.Header(), p.bc)
 			if isSystemTx {
 				systemTxs = append(systemTxs, tx)

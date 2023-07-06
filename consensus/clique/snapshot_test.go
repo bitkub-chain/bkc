@@ -773,7 +773,7 @@ func TestCliquePoSTransition(t *testing.T) {
 		// Assemble a chain of headers from the cast votes
 		config := *params.TestChainConfig
 		config.ErawanBlock = common.Big0
-		config.PoSBlock = big.NewInt(50)
+		config.ChaophrayaBlock = big.NewInt(50)
 		config.MuirGlacierBlock = nil
 		config.BerlinBlock = nil
 		config.LondonBlock = nil
