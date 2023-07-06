@@ -262,6 +262,8 @@ func createMiner(t *testing.T) (*Miner, *event.TypeMux, func(skipMiner bool)) {
 
 	mockContractClient := mock.NewMockContractClient(mockCtl)
 
+	mockContractClient.EXPECT().SetSigner(gomock.Any()).AnyTimes()
+
 	// Create consensus engine
 	engine := clique.New(chainConfig, chainDB, nil, mockContractClient)
 	// Create Ethereum backend

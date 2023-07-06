@@ -212,7 +212,7 @@ func newMockContractClient(t *testing.T) *mock.MockContractClient {
 	mockContractClient.EXPECT().GetCurrentSpan(gomock.Any(), gomock.Any()).AnyTimes()
 	mockContractClient.EXPECT().GetCurrentValidators(gomock.Any(), gomock.Any()).AnyTimes()
 	mockContractClient.EXPECT().GetEligibleValidators(gomock.Any(), gomock.Any()).AnyTimes()
-	mockContractClient.EXPECT().Inject(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	mockContractClient.EXPECT().Inject(gomock.Any(), gomock.Any()).AnyTimes()
 	mockContractClient.EXPECT().IsSlashed(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
 	mockContractClient.EXPECT().Slash(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
 	return mockContractClient
@@ -246,6 +246,7 @@ func testGenerateBlockAndImport(t *testing.T, isClique bool) {
 		chainConfig.Clique = &params.CliqueConfig{Period: 1, Epoch: 30000}
 
 		mockContractClient := newMockContractClient(t)
+		mockContractClient.EXPECT().SetSigner(gomock.Any()).AnyTimes()
 		engine = clique.New(chainConfig, db, nil, mockContractClient)
 	} else {
 		chainConfig = params.AllEthashProtocolChanges
@@ -298,6 +299,7 @@ func TestEmptyWorkEthash(t *testing.T) {
 func TestEmptyWorkClique(t *testing.T) {
 
 	mockContractClient := newMockContractClient(t)
+	mockContractClient.EXPECT().SetSigner(gomock.Any()).AnyTimes()
 	testEmptyWork(t, cliqueChainConfig, clique.New(cliqueChainConfig, rawdb.NewMemoryDatabase(), nil, mockContractClient))
 }
 
@@ -405,6 +407,7 @@ func TestRegenerateMiningBlockEthash(t *testing.T) {
 func TestRegenerateMiningBlockClique(t *testing.T) {
 
 	mockContractClient := newMockContractClient(t)
+	mockContractClient.EXPECT().SetSigner(gomock.Any()).AnyTimes()
 	testRegenerateMiningBlock(t, cliqueChainConfig, clique.New(cliqueChainConfig, rawdb.NewMemoryDatabase(), nil, mockContractClient))
 }
 
@@ -468,6 +471,7 @@ func TestAdjustIntervalEthash(t *testing.T) {
 func TestAdjustIntervalClique(t *testing.T) {
 
 	mockContractClient := newMockContractClient(t)
+	mockContractClient.EXPECT().SetSigner(gomock.Any()).AnyTimes()
 	testAdjustInterval(t, cliqueChainConfig, clique.New(cliqueChainConfig, rawdb.NewMemoryDatabase(), nil, mockContractClient))
 }
 
@@ -565,6 +569,7 @@ func TestGetSealingWorkEthash(t *testing.T) {
 func TestGetSealingWorkClique(t *testing.T) {
 	cliqueChainConfig.ErawanBlock = nil
 	mockContractClient := newMockContractClient(t)
+	mockContractClient.EXPECT().SetSigner(gomock.Any()).AnyTimes()
 	testGetSealingWork(t, cliqueChainConfig, clique.New(cliqueChainConfig, rawdb.NewMemoryDatabase(), nil, mockContractClient), false)
 }
 

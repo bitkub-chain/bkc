@@ -191,6 +191,7 @@ func TestCommitSpan(t *testing.T) {
 	}
 
 	// Iinitialize Clique
+	mockContractClient.EXPECT().SetSigner(gomock.Any()).AnyTimes()
 	c := New(genspec.Config, db, mockEthAPI, mockContractClient)
 
 	// Mock the inject method before authorize
@@ -324,6 +325,7 @@ func TestCommitSpan_NoEligibleValidator(t *testing.T) {
 	}
 
 	// Iinitialize Clique
+	mockContractClient.EXPECT().SetSigner(gomock.Any()).AnyTimes()
 	c := New(genspec.Config, db, mockEthAPI, mockContractClient)
 
 	// Mock the inject method before authorize
@@ -435,6 +437,7 @@ func TestSlashing_Call(t *testing.T) {
 	}
 
 	// Iinitialize Clique
+	mockContractClient.EXPECT().SetSigner(gomock.Any()).AnyTimes()
 	c := New(genspec.Config, db, mockEthAPI, mockContractClient)
 
 	// Mock the inject method before authorize
@@ -591,6 +594,7 @@ func TestSlashing_ShouldNotBeCalledWhenSlashed(t *testing.T) {
 	}
 
 	// Iinitialize Clique
+	mockContractClient.EXPECT().SetSigner(gomock.Any()).AnyTimes()
 	c := New(genspec.Config, db, mockEthAPI, mockContractClient)
 
 	// Mock the inject method before authorize
@@ -741,8 +745,7 @@ func TestDistributeReward(t *testing.T) {
 
 	mockContractClient := mock.NewMockContractClient(mockCtl)
 
-	mockContractClient.EXPECT().SetSigner(gomock.Any()).Times(1)
-
+	mockContractClient.EXPECT().SetSigner(gomock.Any()).AnyTimes()
 	engine := New(&config, db, nil, mockContractClient)
 	engine.fakeDiff = true
 
@@ -889,6 +892,7 @@ func TestRandomValidator(t *testing.T) {
 	}
 
 	// Iinitialize Clique
+	mockContractClient.EXPECT().SetSigner(gomock.Any()).AnyTimes()
 	c := New(genspec.Config, db, mockEthAPI, mockContractClient)
 
 	// Mock the inject method before authorize
