@@ -64,11 +64,6 @@ web3._extend({
 			params: 2
 		}),
 		new web3._extend.Method({
-			name: 'proposeValidatorContract',
-			call: 'clique_proposeValidatorContract',
-			params: 1
-		}),
-		new web3._extend.Method({
 			name: 'discard',
 			call: 'clique_discard',
 			params: 1
