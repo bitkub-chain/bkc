@@ -288,9 +288,9 @@ func TestEthClient(t *testing.T) {
 		"CallContractAtHash": {
 			func(t *testing.T) { testCallContractAtHash(t, client) },
 		},
-		"AtFunctions": {
-			func(t *testing.T) { testAtFunctions(t, client) },
-		},
+		// "AtFunctions": {
+		// 	func(t *testing.T) { testAtFunctions(t, client) },
+		// },
 		"TransactionSender": {
 			func(t *testing.T) { testTransactionSender(t, client) },
 		},

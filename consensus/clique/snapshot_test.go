@@ -24,12 +24,15 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/clique/ctypes"
+	"github.com/ethereum/go-ethereum/consensus/clique/mock"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/golang/mock/gomock"
 )
 
 // testerAccountPool is a pool to maintain currently active tester accounts,
@@ -411,7 +414,13 @@ func TestClique(t *testing.T) {
 			Period: 1,
 			Epoch:  tt.epoch,
 		}
-		engine := New(&config, db)
+		mockCtl := gomock.NewController(t)
+		defer mockCtl.Finish()
+
+		mockContractClient := mock.NewMockContractClient(mockCtl)
+		mockContractClient.EXPECT().SetSigner(gomock.Any()).Times(1)
+		engine := New(&config, db, nil, mockContractClient)
+
 		engine.fakeDiff = true
 
 		blocks, _ := core.GenerateChain(&config, genesis.ToBlock(db), engine, db, len(tt.votes), func(j int, gen *core.BlockGen) {
@@ -602,7 +611,13 @@ func TestCliqueErawanTransition(t *testing.T) {
 			Period: 1,
 			Epoch:  tt.epoch,
 		}
-		engine := New(&config, db)
+
+		mockCtl := gomock.NewController(t)
+		defer mockCtl.Finish()
+
+		mockContractClient := mock.NewMockContractClient(mockCtl)
+		mockContractClient.EXPECT().SetSigner(gomock.Any()).Times(1)
+		engine := New(&config, db, nil, mockContractClient)
 		engine.fakeDiff = true
 
 		blocks, _ := core.GenerateChain(&config, genesis.ToBlock(db), engine, db, len(tt.votes), func(j int, gen *core.BlockGen) {
@@ -694,6 +709,179 @@ func TestCliqueErawanTransition(t *testing.T) {
 			if !bytes.Equal(result[j][:], signers[j][:]) {
 				t.Errorf("test %d, signer %d: signer mismatch: have %x, want %x", i, j, result[j], signers[j])
 			}
+		}
+	}
+}
+
+func TestCliquePoSTransition(t *testing.T) {
+	type validators struct {
+		address string
+		power   uint64
+	}
+	tests := []struct {
+		firstValidatorSet []validators
+		epoch             uint64
+		signers           []string
+		results           []string
+		validators        []string
+		checkValidates    []common.Address
+	}{
+		{
+			firstValidatorSet: []validators{
+				{
+					address: "B",
+					power:   10,
+				},
+				{
+					address: "C",
+					power:   10,
+				},
+			},
+			signers: []string{"A", "B"},
+			results: []string{"A", "B"},
+		},
+	}
+
+	// Run through the scenarios and test them
+	for _, tt := range tests {
+		// Create the account pool and generate the initial set of signers
+		accounts := newTesterAccountPool()
+
+		signers := make([]common.Address, len(tt.signers))
+		for j, signer := range tt.signers {
+			signers[j] = accounts.address(signer)
+		}
+		for j := 0; j < len(signers); j++ {
+			for k := j + 1; k < len(signers); k++ {
+				if bytes.Compare(signers[j][:], signers[k][:]) > 0 {
+					signers[j], signers[k] = signers[k], signers[j]
+				}
+			}
+		}
+		// Create the genesis block with the initial set of signers
+		genesis := &core.Genesis{
+			ExtraData: make([]byte, extraVanity+common.AddressLength*len(signers)+extraSeal),
+			BaseFee:   big.NewInt(params.InitialBaseFee),
+		}
+		for j, signer := range signers {
+			copy(genesis.ExtraData[extraVanity+j*common.AddressLength:], signer[:])
+		}
+		// Create a pristine blockchain with the genesis injected
+		db := rawdb.NewMemoryDatabase()
+		genesis.Commit(db)
+
+		// Assemble a chain of headers from the cast votes
+		config := *params.TestChainConfig
+		config.ErawanBlock = common.Big0
+		config.ChaophrayaBlock = big.NewInt(50)
+		config.MuirGlacierBlock = nil
+		config.BerlinBlock = nil
+		config.LondonBlock = nil
+		config.ArrowGlacierBlock = nil
+		config.MergeForkBlock = nil
+		config.Clique = &params.CliqueConfig{
+			Period: 1,
+			Span:   50,
+			Epoch:  300,
+		}
+		mockCtl := gomock.NewController(t)
+		defer mockCtl.Finish()
+
+		mockContractClient := mock.NewMockContractClient(mockCtl)
+		mockContractClient.EXPECT().SetSigner(gomock.Any()).Times(1)
+		engine := New(&config, db, nil, mockContractClient)
+		engine.fakeDiff = true
+
+		valz_1 := make([]ctypes.Validator, config.Clique.Span)
+		for v := 0; v < int(config.Clique.Span); v++ {
+			valz_1[v] = ctypes.Validator{
+				Address:     accounts.address(tt.firstValidatorSet[v%len(tt.firstValidatorSet)].address),
+				VotingPower: tt.firstValidatorSet[0].power,
+			}
+			tt.checkValidates = append(tt.checkValidates, accounts.address(tt.firstValidatorSet[v%len(tt.firstValidatorSet)].address))
+		}
+
+		blocks, _ := core.GenerateChain(&config, genesis.ToBlock(db), engine, db, int(config.Clique.Span)-1, func(i int, block *core.BlockGen) {
+		})
+
+		for j, block := range blocks {
+			// Get the header and prepare it for signing
+			header := block.Header()
+			if j > 0 {
+				header.ParentHash = blocks[j-1].Hash()
+			}
+
+			// Ensure the extra data has all its components
+			if len(header.Extra) < extraVanity {
+				header.Extra = append(header.Extra, bytes.Repeat([]byte{0x00}, extraVanity-len(header.Extra))...)
+			}
+			header.Extra = header.Extra[:extraVanity]
+
+			if (header.Number.Uint64()+1)%config.Clique.Span == 0 {
+				for _, validator := range valz_1 {
+					header.Extra = append(header.Extra, validator.HeaderBytes()...)
+				}
+				header.Extra = append(header.Extra, common.Address{}.Bytes()...)
+				header.Extra = append(header.Extra, common.Address{}.Bytes()...)
+				header.Extra = append(header.Extra, common.Address{}.Bytes()...)
+			}
+			header.Extra = append(header.Extra, make([]byte, extraSeal)...)
+			header.Difficulty = diffInTurn
+
+			accounts.sign(header, tt.signers[j%len(signers)])
+			blocks[j] = block.WithSeal(header)
+		}
+
+		chain, _ := core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil, nil)
+		_, err := chain.InsertChain(blocks)
+		if err != nil {
+			panic(err)
+		}
+
+		parent := chain.GetBlockByHash(chain.CurrentBlock().Hash())
+
+		engine.snapshot(chain, parent.Number().Uint64(), parent.Hash(), nil)
+
+		block50, _ := core.GenerateChain(&config, parent, engine, db, 1, func(i int, block *core.BlockGen) {})
+
+		chain, _ = core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil, nil)
+
+		for j, block := range block50 {
+			// Get the header and prepare it for signing
+			header := block.Header()
+			if j > 0 {
+				header.ParentHash = block50[j-1].Hash()
+			}
+
+			// Ensure the extra data has all its components
+			if len(header.Extra) < extraVanity {
+				header.Extra = append(header.Extra, bytes.Repeat([]byte{0x00}, extraVanity-len(header.Extra))...)
+			}
+			header.Extra = header.Extra[:extraVanity]
+			header.Extra = append(header.Extra, make([]byte, extraSeal)...)
+			header.Difficulty = diffInTurn
+
+			accounts.sign(header, tt.firstValidatorSet[j%int(config.Clique.Span)].address)
+			block50[j] = block.WithSeal(header)
+		}
+
+		_, err = chain.InsertChain(block50)
+		if err != nil {
+			panic(err)
+		}
+
+		parent = chain.GetBlockByHash(chain.CurrentBlock().Hash())
+
+		snap, _ := engine.snapshot(chain, parent.Number().Uint64(), parent.Hash(), nil)
+
+		for c := 0; c < len(snap.Validators); c++ {
+			if bytes.Compare(tt.checkValidates[c][:], snap.Validators[c][:]) > 0 {
+				t.Errorf("validators mismatch: have %x, want %x", snap.Validators[c], tt.checkValidates[c])
+			}
+		}
+		if len(tt.results) != len(snap.Signers) {
+			t.Errorf("signers mismatch: have %d, want %d", len(snap.Signers), len(snap.Signers))
+			continue
 		}
 	}
 }
