@@ -102,7 +102,7 @@ func (cc *ContractClient) GetCurrentSpan(ctx context.Context, header *types.Head
 	}
 
 	msgData := (hexutil.Bytes)(data)
-	toAddress := cc.config.Clique.ValidatorContract
+	toAddress := cc.getValidatorContract(header.Number)
 	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
 	result, err := cc.ethAPI.Call(ctx, ethapi.TransactionArgs{
 		Gas:  &gas,
@@ -147,8 +147,9 @@ func (cc *ContractClient) CommitSpan(val common.Address, state *state.StateDB, h
 		log.Error("Unable to pack tx for commitspan", "error", err)
 		return err
 	}
+	validatorContract := cc.getValidatorContract(header.Number)
 	// get system message
-	msg := getSystemMessage(header.Coinbase, cc.config.Clique.ValidatorContract, data, common.Big0)
+	msg := getSystemMessage(header.Coinbase, validatorContract, data, common.Big0)
 	// apply message
 	return cc.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
 }
@@ -210,9 +211,10 @@ func (cc *ContractClient) GetCurrentValidators(headerHash common.Hash, blockNumb
 		log.Error("Unable to pack tx for getValidators", "error", err)
 		return nil, nil, err
 	}
+
 	// call
 	msgData := (hexutil.Bytes)(data)
-	toAddress := cc.config.Clique.ValidatorContract
+	toAddress := cc.getValidatorContract(blockNumber)
 	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
 	result, err := cc.ethAPI.Call(ctx, ethapi.TransactionArgs{
 		Gas:  &gas,
@@ -273,7 +275,7 @@ func (cc *ContractClient) GetEligibleValidators(headerHash common.Hash, blockNum
 
 	// call
 	msgData := (hexutil.Bytes)(data)
-	toAddress := cc.config.Clique.ValidatorContract
+	toAddress := cc.getValidatorContract(big.NewInt(int64(blockNumber)))
 	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
 	result, err := cc.ethAPI.Call(ctx, ethapi.TransactionArgs{
 		Gas:  &gas,
@@ -301,6 +303,14 @@ func (cc *ContractClient) GetEligibleValidators(headerHash common.Hash, blockNum
 	}
 
 	return valz, nil
+}
+
+func (cc *ContractClient) getValidatorContract(number *big.Int) common.Address {
+	validatorContract := cc.config.Clique.ValidatorContract
+	if cc.config.ChaophrayaBangkokBlock != nil && cc.config.IsChaophrayaBangkok(number) {
+		validatorContract = cc.config.Clique.ValidatorContractV2
+	}
+	return validatorContract
 }
 
 // Transaction handler functions vvv
