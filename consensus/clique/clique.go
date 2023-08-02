@@ -161,9 +161,10 @@ var (
 func (c *Clique) isToSystemContract(to common.Address, snap *Snapshot) bool {
 	// Map system contracts
 	systemContracts := map[common.Address]bool{
-		c.config.Clique.ValidatorContract: true,
-		snap.SystemContracts.StakeManager: true,
-		snap.SystemContracts.SlashManager: true,
+		c.config.Clique.ValidatorContractV2: true,
+		c.config.Clique.ValidatorContract:   true,
+		snap.SystemContracts.StakeManager:   true,
+		snap.SystemContracts.SlashManager:   true,
 	}
 	return systemContracts[to]
 }
