@@ -1108,7 +1108,7 @@ func (r *Resolver) Blocks(ctx context.Context, args struct {
 	if to < from {
 		return nil, errInvalidBlockRange
 	}
-	ret := make([]*Block, 0, to-from+1)
+	var ret []*Block
 	for i := from; i <= to; i++ {
 		numberOrHash := rpc.BlockNumberOrHashWithNumber(i)
 		block := &Block{
@@ -1126,6 +1126,9 @@ func (r *Resolver) Blocks(ctx context.Context, args struct {
 			break
 		}
 		ret = append(ret, block)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 	}
 	return ret, nil
 }
