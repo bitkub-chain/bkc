@@ -35,10 +35,10 @@ type ContractClient struct {
 	signer          types.Signer
 	val             common.Address
 	signTxFn        ctypes.SignerTxFn
-	ethAPI          EthAPI
+	ethAPI          EthereumAPI
 }
 
-func New(config *params.ChainConfig, ethAPI *ethapi.PublicBlockChainAPI) (*ContractClient, error) {
+func New(config *params.ChainConfig, ethAPI EthereumAPI) (*ContractClient, error) {
 	vABI, err := abi.JSON(strings.NewReader(validatorSetABI))
 	if err != nil {
 		return &ContractClient{}, err
@@ -108,7 +108,7 @@ func (cc *ContractClient) GetCurrentSpan(ctx context.Context, header *types.Head
 		Gas:  &gas,
 		To:   &toAddress,
 		Data: &msgData,
-	}, blockNr, nil)
+	}, blockNr, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +182,7 @@ func (cc *ContractClient) IsSlashed(contract common.Address, chain consensus.Cha
 		Gas:  &gas,
 		To:   &toAddress,
 		Data: &msgData,
-	}, blockNr, nil)
+	}, blockNr, nil, nil)
 	if err != nil {
 		return false, err
 	}
@@ -220,7 +220,7 @@ func (cc *ContractClient) GetCurrentValidators(headerHash common.Hash, blockNumb
 		Gas:  &gas,
 		To:   &toAddress,
 		Data: &msgData,
-	}, blockNr, nil)
+	}, blockNr, nil, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -281,7 +281,7 @@ func (cc *ContractClient) GetEligibleValidators(headerHash common.Hash, blockNum
 		Gas:  &gas,
 		To:   &toAddress,
 		Data: &msgData,
-	}, blockNr, nil)
+	}, blockNr, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -364,7 +364,14 @@ func (cc *ContractClient) applyTransaction(
 		// move to next
 		*receivedTxs = (*receivedTxs)[1:]
 	}
-	state.Prepare(expectedTx.Hash(), len(*txs))
+	state.Prepare(
+		cc.config.Rules(header.Number, false, 0),
+		msg.From(),
+		header.Coinbase,
+		msg.To(),
+		[]common.Address{},
+		nil,
+	)
 	gasUsed, err := applyMessage(msg, state, header, cc.config, chainContext)
 	if err != nil {
 		return err
@@ -382,7 +389,7 @@ func (cc *ContractClient) applyTransaction(
 	receipt.GasUsed = gasUsed
 
 	// Set the receipt logs and create a bloom for filtering
-	receipt.Logs = state.GetLogs(expectedTx.Hash(), header.Hash())
+	receipt.Logs = state.GetLogs(expectedTx.Hash(), header.Number.Uint64(), header.Hash())
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 	receipt.BlockHash = header.Hash()
 	receipt.BlockNumber = header.Number

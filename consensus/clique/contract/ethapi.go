@@ -8,9 +8,9 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 )
 //go:generate mockgen -destination=./mock/eth_api_mock.go -package=mock . EthAPI
-type EthAPI interface {
+type EthereumAPI interface {
 	// BlockNumber() hexutil.Uint64
-	Call(ctx context.Context, args ethapi.TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *ethapi.StateOverride) (hexutil.Bytes, error)
+	Call(ctx context.Context, args ethapi.TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *ethapi.StateOverride, blockOverrides *ethapi.BlockOverrides) (hexutil.Bytes, error)
 	// ChainId() (*hexutil.Big, error)
 	// CreateAccessList(ctx context.Context, args ethapi.TransactionArgs, blockNrOrHash *rpc.BlockNumberOrHash) (*ethapi.accessListResult, error)
 	// EstimateGas(ctx context.Context, args ethapi.TransactionArgs, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Uint64, error)

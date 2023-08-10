@@ -33,6 +33,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	lru "github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/clique/ctypes"
 	"github.com/ethereum/go-ethereum/consensus/misc"
@@ -46,7 +47,6 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethereum/go-ethereum/trie"
-	lru "github.com/hashicorp/golang-lru"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -170,11 +170,11 @@ func (c *Clique) isToSystemContract(to common.Address, snap *Snapshot) bool {
 }
 
 // ecrecover extracts the Ethereum account address from a signed header.
-func ecrecover(header *types.Header, sigcache *lru.ARCCache) (common.Address, error) {
+func ecrecover(header *types.Header, sigcache *sigLRU) (common.Address, error) {
 	// If the signature's already cached, return that
 	hash := header.Hash()
 	if address, known := sigcache.Get(hash); known {
-		return address.(common.Address), nil
+		return address, nil
 	}
 	// Retrieve the signature from the header extra-data
 	if len(header.Extra) < extraSeal {
@@ -200,8 +200,8 @@ type Clique struct {
 	config *params.ChainConfig // Consensus engine configuration parameters
 	db     ethdb.Database      // Database to store and retrieve snapshot checkpoints
 
-	recents    *lru.ARCCache // Snapshots for recent block to speed up reorgs
-	signatures *lru.ARCCache // Signatures of recent blocks to speed up mining
+	recents    *lru.Cache[common.Hash, *Snapshot] // Snapshots for recent block to speed up reorgs
+	signatures *sigLRU                            // Signatures of recent blocks to speed up mining
 
 	proposals map[common.Address]bool // Current list of proposals we are pushing
 
@@ -214,7 +214,7 @@ type Clique struct {
 	// SuperNodes map[common.Address]struct{} `json:"supernodes"` // Set of authorized bitkub super nodes
 	lock sync.RWMutex // Protects the signer fields
 
-	ethAPI EthAPI
+	backend Backend
 
 	// The fields below are for testing only
 	fakeDiff bool // Skip difficulty verifications
@@ -228,7 +228,7 @@ type Clique struct {
 func New(
 	config *params.ChainConfig,
 	db ethdb.Database,
-	ethAPI EthAPI,
+	backend Backend,
 	contractClient ContractClient,
 ) *Clique {
 	// Set any missing consensus parameters to their defaults
@@ -237,8 +237,8 @@ func New(
 		conf.Clique.Epoch = epochLength
 	}
 	// Allocate the snapshot caches and create the engine
-	recents, _ := lru.NewARC(inmemorySnapshots)
-	signatures, _ := lru.NewARC(inmemorySignatures)
+	recents := lru.NewCache[common.Hash, *Snapshot](inmemorySnapshots)
+	signatures := lru.NewCache[common.Hash, common.Address](inmemorySignatures)
 
 	defaultSigner := types.NewEIP155Signer(config.ChainID)
 	contractClient.SetSigner(defaultSigner)
@@ -248,7 +248,7 @@ func New(
 		db:             db,
 		recents:        recents,
 		signatures:     signatures,
-		ethAPI:         ethAPI,
+		backend:        backend,
 		contractClient: contractClient,
 		proposals:      make(map[common.Address]bool),
 		signer:         defaultSigner,
@@ -281,14 +281,14 @@ func (c *Clique) Author(header *types.Header) (common.Address, error) {
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
-func (c *Clique) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
+func (c *Clique) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header) error {
 	return c.verifyHeader(chain, header, nil)
 }
 
 // VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers. The
 // method returns a quit channel to abort the operations and a results channel to
 // retrieve the async verifications (the order is that of the input slice).
-func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) (chan<- struct{}, <-chan error) {
+func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header) (chan<- struct{}, <-chan error) {
 	abort := make(chan struct{})
 	results := make(chan error, len(headers))
 
@@ -386,9 +386,11 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	if header.GasLimit > params.MaxGasLimit {
 		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
 	}
-	// If all checks passed, validate any special fields for hard forks
-	if err := misc.VerifyForkHashes(chain.Config(), header, false); err != nil {
-		return err
+	if chain.Config().IsShanghai(header.Number, header.Time) {
+		return errors.New("clique does not support shanghai fork")
+	}
+	if chain.Config().IsCancun(header.Number, header.Time) {
+		return errors.New("clique does not support cancun fork")
 	}
 	// All basic checks passed, verify cascading fields
 	return c.verifyCascadingFields(chain, header, parents)
@@ -468,7 +470,7 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	for snap == nil {
 		// If an in-memory snapshot was found, use that
 		if s, ok := c.recents.Get(hash); ok {
-			snap = s.(*Snapshot)
+			snap = s
 			break
 		}
 		// If an on-disk checkpoint snapshot can be found, use that
@@ -667,6 +669,11 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 
 		c.lock.RUnlock()
 	}
+
+	// Copy signer protected by mutex to avoid race condition
+	// ! Note: disable this signer := c.signer
+	c.lock.RUnlock()
+
 	// Set the correct difficulty
 	header.Difficulty = calcDifficulty(snap, c.val)
 
@@ -904,7 +911,7 @@ func (c *Clique) commitSpan(val common.Address, state *state.StateDB, header *ty
 	defer cancel()
 	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
 
-	confirmBlockNr, _ := c.ethAPI.GetHeaderTypeByNumber(ctx, rpc.BlockNumber(parent.Number.Uint64()-5))
+	confirmBlockNr, _ := c.backend.HeaderByNumber(ctx, rpc.BlockNumber(parent.Number.Uint64()-5))
 
 	newValidators, _ := c.selectNextValidatorSet(parent, confirmBlockNr)
 
@@ -1088,9 +1095,7 @@ func (c *Clique) Close() error {
 func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	return []rpc.API{{
 		Namespace: "clique",
-		Version:   "1.0",
 		Service:   &API{chain: chain, clique: c},
-		Public:    false,
 	}}
 }
 
@@ -1220,6 +1225,9 @@ func encodeSigHeader(w io.Writer, header *types.Header) {
 	}
 	if header.BaseFee != nil {
 		enc = append(enc, header.BaseFee)
+	}
+	if header.WithdrawalsHash != nil {
+		panic("unexpected withdrawal hash value in clique")
 	}
 	if err := rlp.Encode(w, enc); err != nil {
 		panic("can't encode: " + err.Error())
