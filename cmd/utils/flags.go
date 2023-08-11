@@ -38,10 +38,6 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/fdlimit"
-	"github.com/ethereum/go-ethereum/consensus"
-	"github.com/ethereum/go-ethereum/consensus/clique"
-	"github.com/ethereum/go-ethereum/consensus/clique/contract"
-	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -1300,28 +1296,6 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.Miner.Etherbase = common.BytesToAddress(b)
 }
 
-// setSealerAddress retrieves the sealer address either from the directly specified
-// command line flags or from the keystore if CLI indexed.
-func setSealerAddress(ctx *cli.Context, ks *keystore.KeyStore, cfg *ethconfig.Config) {
-	// Extract the current sealer address
-	var sealerAddress string
-	if ctx.GlobalIsSet(MinerSealerAddressFlag.Name) {
-		sealerAddress = ctx.GlobalString(MinerSealerAddressFlag.Name)
-	}
-	// Convert the sealer address into an address and configure it
-	if sealerAddress != "" {
-		if ks != nil {
-			account, err := MakeAddress(ks, sealerAddress)
-			if err != nil {
-				Fatalf("Invalid miner sealer address: %v", err)
-			}
-			cfg.Miner.SealerAddress = account.Address
-		} else {
-			Fatalf("No sealer address configured")
-		}
-	}
-}
-
 // MakePasswordList reads password lines from the file specified by the global --password flag.
 func MakePasswordList(ctx *cli.Context) []string {
 	path := ctx.Path(PasswordFileFlag.Name)
@@ -2160,27 +2134,9 @@ func MakeChain(ctx *cli.Context, stack *node.Node, readonly bool) (*core.BlockCh
 	if err != nil {
 		Fatalf("%v", err)
 	}
-	var engine consensus.Engine
-	if config.Clique != nil {
-		client, err := contract.New(config, nil)
-		if err != nil {
-			panic(err)
-		}
-		engine = clique.New(config, chainDb, nil, client)
-	} else {
-		engine = ethash.NewFaker()
-		if !ctx.GlobalBool(FakePoWFlag.Name) {
-			engine = ethash.New(ethash.Config{
-				CacheDir:         stack.ResolvePath(ethconfig.Defaults.Ethash.CacheDir),
-				CachesInMem:      ethconfig.Defaults.Ethash.CachesInMem,
-				CachesOnDisk:     ethconfig.Defaults.Ethash.CachesOnDisk,
-				CachesLockMmap:   ethconfig.Defaults.Ethash.CachesLockMmap,
-				DatasetDir:       stack.ResolvePath(ethconfig.Defaults.Ethash.DatasetDir),
-				DatasetsInMem:    ethconfig.Defaults.Ethash.DatasetsInMem,
-				DatasetsOnDisk:   ethconfig.Defaults.Ethash.DatasetsOnDisk,
-				DatasetsLockMmap: ethconfig.Defaults.Ethash.DatasetsLockMmap,
-			}, nil, false)
-		}
+	engine, err := ethconfig.CreateConsensusEngine(config, chainDb, nil, nil)
+	if err != nil {
+		Fatalf("%v", err)
 	}
 	if gcmode := ctx.String(GCModeFlag.Name); gcmode != "full" && gcmode != "archive" {
 		Fatalf("--%s must be either 'full' or 'archive'", GCModeFlag.Name)
