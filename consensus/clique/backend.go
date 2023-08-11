@@ -7,7 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
-//go:generate mockgen -destination=./mock/ethapi_mock.go -package=mock . EthAPI
+//go:generate mockgen -source=./backend.go -destination=./mock/backend_mock.go -package=mock
 type Backend interface {
 	// BlockNumber() hexutil.Uint64
 	// Call(ctx context.Context, args ethapi.TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *ethapi.StateOverride) (hexutil.Bytes, error)

@@ -19,7 +19,6 @@ package clique
 import (
 	"bytes"
 	"crypto/ecdsa"
-	"fmt"
 	"math/big"
 	"sort"
 	"testing"
@@ -89,7 +88,7 @@ func (ap *testerAccountPool) sign(header *types.Header, signer string) {
 	copy(header.Extra[len(header.Extra)-extraSeal:], sig)
 }
 
-// testerVote represents a single block signed by a particular account, where
+// testerVote represents a single block signed by a parcitular account, where
 // the account may or may not have cast a Clique vote.
 type testerVote struct {
 	signer     string
@@ -99,19 +98,17 @@ type testerVote struct {
 	newbatch   bool
 }
 
-type cliqueTest struct {
-	epoch   uint64
-	signers []string
-	votes   []testerVote
-	results []string
-	failure error
-}
-
 // Tests that Clique signer voting is evaluated correctly for various simple and
 // complex scenarios, as well as that a few special corner cases fail correctly.
 func TestClique(t *testing.T) {
 	// Define the various voting scenarios to test
-	tests := []cliqueTest{
+	tests := []struct {
+		epoch   uint64
+		signers []string
+		votes   []testerVote
+		results []string
+		failure error
+	}{
 		{
 			// Single signer, no votes cast
 			signers: []string{"A"},
@@ -311,7 +308,7 @@ func TestClique(t *testing.T) {
 		}, {
 			// Ensure that pending votes don't survive authorization status changes. This
 			// corner case can only appear if a signer is quickly added, removed and then
-			// re-added (or the inverse), while one of the original voters dropped. If a
+			// readded (or the inverse), while one of the original voters dropped. If a
 			// past vote is left cached in the system somewhere, this will interfere with
 			// the final signer outcome.
 			signers: []string{"A", "B", "C", "D", "E"},
@@ -350,7 +347,7 @@ func TestClique(t *testing.T) {
 			},
 			failure: errUnauthorizedSigner,
 		}, {
-			// An authorized signer that signed recently should not be able to sign again
+			// An authorized signer that signed recenty should not be able to sign again
 			signers: []string{"A", "B"},
 			votes: []testerVote{
 				{signer: "A"},
@@ -383,16 +380,33 @@ func TestClique(t *testing.T) {
 			failure: errRecentlySigned,
 		},
 	}
-
 	// Run through the scenarios and test them
 	for i, tt := range tests {
-		t.Run(fmt.Sprint(i), tt.run)
-	}
-}
+		// Create the account pool and generate the initial set of signers
+		accounts := newTesterAccountPool()
 
-func (tt *cliqueTest) run(t *testing.T) {
-	// Create the account pool and generate the initial set of signers
-	accounts := newTesterAccountPool()
+		signers := make([]common.Address, len(tt.signers))
+		for j, signer := range tt.signers {
+			signers[j] = accounts.address(signer)
+		}
+		for j := 0; j < len(signers); j++ {
+			for k := j + 1; k < len(signers); k++ {
+				if bytes.Compare(signers[j][:], signers[k][:]) > 0 {
+					signers[j], signers[k] = signers[k], signers[j]
+				}
+			}
+		}
+		// Create the genesis block with the initial set of signers
+		genesis := &core.Genesis{
+			ExtraData: make([]byte, extraVanity+common.AddressLength*len(signers)+extraSeal),
+			BaseFee:   big.NewInt(params.InitialBaseFee),
+		}
+		for j, signer := range signers {
+			copy(genesis.ExtraData[extraVanity+j*common.AddressLength:], signer[:])
+		}
+		// Create a pristine blockchain with the genesis injected
+		db := rawdb.NewMemoryDatabase()
+		genesis.MustCommit(db)
 
 		// Assemble a chain of headers from the cast votes
 		config := *params.TestChainConfig
@@ -409,7 +423,7 @@ func (tt *cliqueTest) run(t *testing.T) {
 
 		engine.fakeDiff = true
 
-		blocks, _ := core.GenerateChain(&config, genesis.ToBlock(db), engine, db, len(tt.votes), func(j int, gen *core.BlockGen) {
+		blocks, _ := core.GenerateChain(&config, genesis.ToBlock(), engine, db, len(tt.votes), func(j int, gen *core.BlockGen) {
 			// Cast the vote contained in this block
 			if config.IsErawan(gen.Number()) {
 				gen.SetMixDigest(accounts.address(tt.votes[j].voted))
@@ -449,7 +463,7 @@ func (tt *cliqueTest) run(t *testing.T) {
 			batches[len(batches)-1] = append(batches[len(batches)-1], block)
 		}
 		// Pass all the headers through clique and ensure tallying succeeds
-		chain, err := core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil, nil)
+		chain, err := core.NewBlockChain(db, nil, genesis, nil, engine, vm.Config{}, nil, nil)
 		if err != nil {
 			t.Errorf("test %d: failed to create test chain: %v", i, err)
 			continue
@@ -500,109 +514,6 @@ func (tt *cliqueTest) run(t *testing.T) {
 			if !bytes.Equal(result[j][:], signers[j][:]) {
 				t.Errorf("test %d, signer %d: signer mismatch: have %x, want %x", i, j, result[j], signers[j])
 			}
-		}
-	}
-	// Create the genesis block with the initial set of signers
-	genesis := &core.Genesis{
-		ExtraData: make([]byte, extraVanity+common.AddressLength*len(signers)+extraSeal),
-		BaseFee:   big.NewInt(params.InitialBaseFee),
-	}
-	for j, signer := range signers {
-		copy(genesis.ExtraData[extraVanity+j*common.AddressLength:], signer[:])
-	}
-
-	// Assemble a chain of headers from the cast votes
-	config := *params.TestChainConfig
-	config.Clique = &params.CliqueConfig{
-		Period: 1,
-		Epoch:  tt.epoch,
-	}
-	genesis.Config = &config
-
-	engine := New(config.Clique, rawdb.NewMemoryDatabase())
-	engine.fakeDiff = true
-
-	_, blocks, _ := core.GenerateChainWithGenesis(genesis, engine, len(tt.votes), func(j int, gen *core.BlockGen) {
-		// Cast the vote contained in this block
-		gen.SetCoinbase(accounts.address(tt.votes[j].voted))
-		if tt.votes[j].auth {
-			var nonce types.BlockNonce
-			copy(nonce[:], nonceAuthVote)
-			gen.SetNonce(nonce)
-		}
-	})
-	// Iterate through the blocks and seal them individually
-	for j, block := range blocks {
-		// Get the header and prepare it for signing
-		header := block.Header()
-		if j > 0 {
-			header.ParentHash = blocks[j-1].Hash()
-		}
-		header.Extra = make([]byte, extraVanity+extraSeal)
-		if auths := tt.votes[j].checkpoint; auths != nil {
-			header.Extra = make([]byte, extraVanity+len(auths)*common.AddressLength+extraSeal)
-			accounts.checkpoint(header, auths)
-		}
-		header.Difficulty = diffInTurn // Ignored, we just need a valid number
-
-		// Generate the signature, embed it into the header and the block
-		accounts.sign(header, tt.votes[j].signer)
-		blocks[j] = block.WithSeal(header)
-	}
-	// Split the blocks up into individual import batches (cornercase testing)
-	batches := [][]*types.Block{nil}
-	for j, block := range blocks {
-		if tt.votes[j].newbatch {
-			batches = append(batches, nil)
-		}
-		batches[len(batches)-1] = append(batches[len(batches)-1], block)
-	}
-	// Pass all the headers through clique and ensure tallying succeeds
-	chain, err := core.NewBlockChain(rawdb.NewMemoryDatabase(), nil, genesis, nil, engine, vm.Config{}, nil, nil)
-	if err != nil {
-		t.Fatalf("failed to create test chain: %v", err)
-	}
-	defer chain.Stop()
-
-	for j := 0; j < len(batches)-1; j++ {
-		if k, err := chain.InsertChain(batches[j]); err != nil {
-			t.Fatalf("failed to import batch %d, block %d: %v", j, k, err)
-			break
-		}
-	}
-	if _, err = chain.InsertChain(batches[len(batches)-1]); err != tt.failure {
-		t.Errorf("failure mismatch: have %v, want %v", err, tt.failure)
-	}
-	if tt.failure != nil {
-		return
-	}
-
-	// No failure was produced or requested, generate the final voting snapshot
-	head := blocks[len(blocks)-1]
-
-	snap, err := engine.snapshot(chain, head.NumberU64(), head.Hash(), nil)
-	if err != nil {
-		t.Fatalf("failed to retrieve voting snapshot: %v", err)
-	}
-	// Verify the final list of signers against the expected ones
-	signers = make([]common.Address, len(tt.results))
-	for j, signer := range tt.results {
-		signers[j] = accounts.address(signer)
-	}
-	for j := 0; j < len(signers); j++ {
-		for k := j + 1; k < len(signers); k++ {
-			if bytes.Compare(signers[j][:], signers[k][:]) > 0 {
-				signers[j], signers[k] = signers[k], signers[j]
-			}
-		}
-	}
-	result := snap.signers()
-	if len(result) != len(signers) {
-		t.Fatalf("signers mismatch: have %x, want %x", result, signers)
-	}
-	for j := 0; j < len(result); j++ {
-		if !bytes.Equal(result[j][:], signers[j][:]) {
-			t.Fatalf("signer %d: signer mismatch: have %x, want %x", j, result[j], signers[j])
 		}
 	}
 }
@@ -686,7 +597,7 @@ func TestCliqueErawanTransition(t *testing.T) {
 		}
 		// Create a pristine blockchain with the genesis injected
 		db := rawdb.NewMemoryDatabase()
-		genesis.Commit(db)
+		genesis.MustCommit(db)
 
 		// Assemble a chain of headers from the cast votes
 		config := *params.TestChainConfig
@@ -695,7 +606,7 @@ func TestCliqueErawanTransition(t *testing.T) {
 		config.BerlinBlock = nil
 		config.LondonBlock = nil
 		config.ArrowGlacierBlock = nil
-		config.MergeForkBlock = nil
+		// config.MergeForkBlock = nil
 		config.Clique = &params.CliqueConfig{
 			Period: 1,
 			Epoch:  tt.epoch,
@@ -709,7 +620,7 @@ func TestCliqueErawanTransition(t *testing.T) {
 		engine := New(&config, db, nil, mockContractClient)
 		engine.fakeDiff = true
 
-		blocks, _ := core.GenerateChain(&config, genesis.ToBlock(db), engine, db, len(tt.votes), func(j int, gen *core.BlockGen) {
+		blocks, _ := core.GenerateChain(&config, genesis.ToBlock(), engine, db, len(tt.votes), func(j int, gen *core.BlockGen) {
 			// Cast the vote contained in this block
 			if config.IsErawan(gen.Number()) {
 				gen.SetMixDigest(accounts.address(tt.votes[j].voted))
@@ -749,7 +660,7 @@ func TestCliqueErawanTransition(t *testing.T) {
 			batches[len(batches)-1] = append(batches[len(batches)-1], block)
 		}
 		// Pass all the headers through clique and ensure tallying succeeds
-		chain, err := core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil, nil)
+		chain, err := core.NewBlockChain(db, nil, genesis, nil, engine, vm.Config{}, nil, nil)
 		if err != nil {
 			t.Errorf("test %d: failed to create test chain: %v", i, err)
 			continue
@@ -857,7 +768,7 @@ func TestCliquePoSTransition(t *testing.T) {
 		}
 		// Create a pristine blockchain with the genesis injected
 		db := rawdb.NewMemoryDatabase()
-		genesis.Commit(db)
+		genesis.MustCommit(db)
 
 		// Assemble a chain of headers from the cast votes
 		config := *params.TestChainConfig
@@ -867,7 +778,7 @@ func TestCliquePoSTransition(t *testing.T) {
 		config.BerlinBlock = nil
 		config.LondonBlock = nil
 		config.ArrowGlacierBlock = nil
-		config.MergeForkBlock = nil
+		// config.MergeForkBlock = nil
 		config.Clique = &params.CliqueConfig{
 			Period: 1,
 			Span:   50,
@@ -890,7 +801,7 @@ func TestCliquePoSTransition(t *testing.T) {
 			tt.checkValidates = append(tt.checkValidates, accounts.address(tt.firstValidatorSet[v%len(tt.firstValidatorSet)].address))
 		}
 
-		blocks, _ := core.GenerateChain(&config, genesis.ToBlock(db), engine, db, int(config.Clique.Span)-1, func(i int, block *core.BlockGen) {
+		blocks, _ := core.GenerateChain(&config, genesis.ToBlock(), engine, db, int(config.Clique.Span)-1, func(i int, block *core.BlockGen) {
 		})
 
 		for j, block := range blocks {
@@ -921,7 +832,7 @@ func TestCliquePoSTransition(t *testing.T) {
 			blocks[j] = block.WithSeal(header)
 		}
 
-		chain, _ := core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil, nil)
+		chain, _ := core.NewBlockChain(db, nil, genesis, nil, engine, vm.Config{}, nil, nil)
 		_, err := chain.InsertChain(blocks)
 		if err != nil {
 			panic(err)
@@ -933,7 +844,7 @@ func TestCliquePoSTransition(t *testing.T) {
 
 		block50, _ := core.GenerateChain(&config, parent, engine, db, 1, func(i int, block *core.BlockGen) {})
 
-		chain, _ = core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil, nil)
+		chain, _ = core.NewBlockChain(db, nil, genesis, nil, engine, vm.Config{}, nil, nil)
 
 		for j, block := range block50 {
 			// Get the header and prepare it for signing

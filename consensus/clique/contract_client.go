@@ -14,7 +14,7 @@ import (
 
 // Contract Client for calling proof-of-stake smart contract on bkc
 
-//go:generate mockgen -destination=./mock/contract_client_mock.go -package=mock . ContractClient
+//go:generate mockgen -source=./contract_client.go -destination=./mock/contract_client_mock.go -package=mock
 type ContractClient interface {
 
 	// Set default signer for contract client

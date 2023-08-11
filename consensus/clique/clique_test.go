@@ -33,6 +33,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/trie"
 	"github.com/golang/mock/gomock"
 )
 
@@ -161,7 +162,7 @@ func TestCommitSpan(t *testing.T) {
 
 	// mock up all instances
 	mockContractClient := mock.NewMockContractClient(mockCtl)
-	mockEthAPI := mock.NewMockEthAPI(mockCtl)
+	mockBackend := mock.NewMockBackend(mockCtl)
 
 	mockContractClient.EXPECT().SetSigner(gomock.Any()).Times(1)
 
@@ -190,7 +191,7 @@ func TestCommitSpan(t *testing.T) {
 
 	// Iinitialize Clique
 	mockContractClient.EXPECT().SetSigner(gomock.Any()).AnyTimes()
-	c := New(genspec.Config, db, mockEthAPI, mockContractClient)
+	c := New(genspec.Config, db, mockBackend, mockContractClient)
 
 	// Mock the inject method before authorize
 	mockContractClient.EXPECT().Inject(
@@ -200,7 +201,7 @@ func TestCommitSpan(t *testing.T) {
 	c.Authorize(coinbase.Address, signFn, nil)
 
 	// Create test chain
-	testChain, err := test.NewTestChain(genspec.Config, c, db, signFn, coinbase)
+	testChain, err := test.NewTestChain(genspec, c, db, signFn, coinbase)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +257,7 @@ func TestCommitSpan(t *testing.T) {
 
 	// Note: Set calls for number 2 times for both Finalize and FinalizeAndAssemble
 	// Mock the EthAPI call
-	mockEthAPI.EXPECT().GetHeaderTypeByNumber(gomock.Any(), gomock.Any()).Return(seedBlock, nil).Times(2)
+	mockBackend.EXPECT().HeaderByNumber(gomock.Any(), gomock.Any()).Return(seedBlock, nil).Times(2)
 
 	// Mock the ContractClient calls
 	mockContractClient.EXPECT().GetEligibleValidators(gomock.Any(), gomock.Any()).Return(signers, nil).Times(2)
@@ -301,7 +302,7 @@ func TestCommitSpan_NoEligibleValidator(t *testing.T) {
 
 	// mock up all instances
 	mockContractClient := mock.NewMockContractClient(mockCtl)
-	mockEthAPI := mock.NewMockEthAPI(mockCtl)
+	mockBackend := mock.NewMockBackend(mockCtl)
 
 	mockContractClient.EXPECT().SetSigner(gomock.Any()).Times(1)
 
@@ -324,7 +325,7 @@ func TestCommitSpan_NoEligibleValidator(t *testing.T) {
 
 	// Iinitialize Clique
 	mockContractClient.EXPECT().SetSigner(gomock.Any()).AnyTimes()
-	c := New(genspec.Config, db, mockEthAPI, mockContractClient)
+	c := New(genspec.Config, db, mockBackend, mockContractClient)
 
 	// Mock the inject method before authorize
 	mockContractClient.EXPECT().Inject(
@@ -334,7 +335,7 @@ func TestCommitSpan_NoEligibleValidator(t *testing.T) {
 	c.Authorize(coinbase.Address, signFn, nil)
 
 	// Create test chain
-	testChain, err := test.NewTestChain(genspec.Config, c, db, signFn, coinbase)
+	testChain, err := test.NewTestChain(genspec, c, db, signFn, coinbase)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,7 +411,7 @@ func TestSlashing_Call(t *testing.T) {
 
 	// mock up all instances
 	mockContractClient := mock.NewMockContractClient(mockCtl)
-	mockEthAPI := mock.NewMockEthAPI(mockCtl)
+	mockBackend := mock.NewMockBackend(mockCtl)
 
 	mockContractClient.EXPECT().SetSigner(gomock.Any()).Times(1)
 
@@ -436,7 +437,7 @@ func TestSlashing_Call(t *testing.T) {
 
 	// Iinitialize Clique
 	mockContractClient.EXPECT().SetSigner(gomock.Any()).AnyTimes()
-	c := New(genspec.Config, db, mockEthAPI, mockContractClient)
+	c := New(genspec.Config, db, mockBackend, mockContractClient)
 
 	// Mock the inject method before authorize
 	mockContractClient.EXPECT().Inject(
@@ -445,7 +446,7 @@ func TestSlashing_Call(t *testing.T) {
 	).Times(1)
 	c.Authorize(coinbase.Address, signFn, nil)
 
-	testChain, err := test.NewTestChain(genspec.Config, c, db, signFn, coinbase)
+	testChain, err := test.NewTestChain(genspec, c, db, signFn, coinbase)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -567,7 +568,7 @@ func TestSlashing_ShouldNotBeCalledWhenSlashed(t *testing.T) {
 
 	// mock up all instances
 	mockContractClient := mock.NewMockContractClient(mockCtl)
-	mockEthAPI := mock.NewMockEthAPI(mockCtl)
+	mockBackend := mock.NewMockBackend(mockCtl)
 
 	mockContractClient.EXPECT().SetSigner(gomock.Any()).Times(1)
 
@@ -593,7 +594,7 @@ func TestSlashing_ShouldNotBeCalledWhenSlashed(t *testing.T) {
 
 	// Iinitialize Clique
 	mockContractClient.EXPECT().SetSigner(gomock.Any()).AnyTimes()
-	c := New(genspec.Config, db, mockEthAPI, mockContractClient)
+	c := New(genspec.Config, db, mockBackend, mockContractClient)
 
 	// Mock the inject method before authorize
 	mockContractClient.EXPECT().Inject(
@@ -602,7 +603,7 @@ func TestSlashing_ShouldNotBeCalledWhenSlashed(t *testing.T) {
 	).Times(1)
 	c.Authorize(coinbase.Address, signFn, nil)
 
-	testChain, err := test.NewTestChain(genspec.Config, c, db, signFn, coinbase)
+	testChain, err := test.NewTestChain(genspec, c, db, signFn, coinbase)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -721,7 +722,7 @@ func TestDistributeReward(t *testing.T) {
 	copy(genesis.ExtraData[extraVanity:], addr[:])
 	// Create a pristine blockchain with the genesis injected
 	db := rawdb.NewMemoryDatabase()
-	genesis.Commit(db)
+	genesis.Commit(db, trie.NewDatabase(db))
 
 	// Assemble a chain of headers from the cast votes
 	config := *params.TestChainConfig
@@ -731,7 +732,6 @@ func TestDistributeReward(t *testing.T) {
 	config.BerlinBlock = nil
 	config.LondonBlock = nil
 	config.ArrowGlacierBlock = nil
-	config.MergeForkBlock = nil
 	config.Clique = &params.CliqueConfig{
 		Period:            1,
 		Span:              50,
@@ -747,7 +747,16 @@ func TestDistributeReward(t *testing.T) {
 	engine := New(&config, db, nil, mockContractClient)
 	engine.fakeDiff = true
 
-	chain, _ := core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil, nil)
+	chain, _ := core.NewBlockChain(
+		db,
+		nil,
+		genesis,
+		nil,
+		engine,
+		vm.Config{},
+		nil,
+		nil,
+	)
 
 	valz_1 := make([]ctypes.Validator, config.Clique.Span)
 	for v := 0; v < int(config.Clique.Span); v++ {
@@ -757,7 +766,7 @@ func TestDistributeReward(t *testing.T) {
 		}
 	}
 
-	blocks, _ := core.GenerateChain(&config, genesis.ToBlock(db), engine, db, int(config.Clique.Span)-1, func(i int, block *core.BlockGen) {
+	blocks, _ := core.GenerateChain(&config, genesis.ToBlock(), engine, db, int(config.Clique.Span)-1, func(i int, block *core.BlockGen) {
 	})
 
 	for j, block := range blocks {
@@ -792,7 +801,7 @@ func TestDistributeReward(t *testing.T) {
 	if _, err := chain.InsertChain(blocks); err != nil {
 		t.Fatalf("failed to insert initial blocks: %v", err)
 	}
-	if head := chain.CurrentBlock().NumberU64(); head != 49 {
+	if head := chain.CurrentBlock().Number.Uint64(); head != 49 {
 		t.Fatalf("chain head mismatch: have %d, want %d", head, 49)
 	}
 
@@ -868,7 +877,7 @@ func TestRandomValidator(t *testing.T) {
 
 	// mock up all instances
 	mockContractClient := mock.NewMockContractClient(mockCtl)
-	mockEthAPI := mock.NewMockEthAPI(mockCtl)
+	mockBackend := mock.NewMockBackend(mockCtl)
 
 	mockContractClient.EXPECT().SetSigner(gomock.Any()).Times(1)
 
@@ -891,7 +900,7 @@ func TestRandomValidator(t *testing.T) {
 
 	// Iinitialize Clique
 	mockContractClient.EXPECT().SetSigner(gomock.Any()).AnyTimes()
-	c := New(genspec.Config, db, mockEthAPI, mockContractClient)
+	c := New(genspec.Config, db, mockBackend, mockContractClient)
 
 	// Mock the inject method before authorize
 	mockContractClient.EXPECT().Inject(
@@ -901,7 +910,7 @@ func TestRandomValidator(t *testing.T) {
 	c.Authorize(coinbase.Address, signFn, nil)
 
 	// Create test chain
-	testChain, err := test.NewTestChain(genspec.Config, c, db, signFn, coinbase)
+	testChain, err := test.NewTestChain(genspec, c, db, signFn, coinbase)
 	if err != nil {
 		t.Fatal(err)
 	}

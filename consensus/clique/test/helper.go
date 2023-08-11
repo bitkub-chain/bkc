@@ -113,21 +113,21 @@ func (r *AccountRegistry) Get(label string) Account {
 
 type TestChain struct {
 	Chain           *core.BlockChain
-	Config          *params.ChainConfig
+	Genesis         *core.Genesis
 	SignFn          SignFn
 	CoinbaseAccount Account
 
 	db ethdb.Database
 }
 
-func NewTestChain(config *params.ChainConfig, engine consensus.Engine, db ethdb.Database, signFn SignFn, coinbaseAccount Account) (*TestChain, error) {
-	chain, err := core.NewBlockChain(db, nil, config, engine, vm.Config{}, nil, nil)
+func NewTestChain(genesis *core.Genesis, engine consensus.Engine, db ethdb.Database, signFn SignFn, coinbaseAccount Account) (*TestChain, error) {
+	chain, err := core.NewBlockChain(db, nil, genesis, nil, engine, vm.Config{}, nil, nil)
 	if err != nil {
 		return &TestChain{}, err
 	}
 	tc := &TestChain{
 		Chain:           chain,
-		Config:          config,
+		Genesis:         genesis,
 		SignFn:          signFn,
 		CoinbaseAccount: coinbaseAccount,
 		db:              db,
