@@ -364,6 +364,7 @@ func (cc *ContractClient) applyTransaction(
 		// move to next
 		*receivedTxs = (*receivedTxs)[1:]
 	}
+	state.SetTxContext(expectedTx.Hash(), len(*txs))
 	state.Prepare(
 		cc.config.Rules(header.Number, false, 0),
 		msg.From(),
