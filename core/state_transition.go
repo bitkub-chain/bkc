@@ -383,15 +383,19 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		// After EIP-3529: refunds are capped to gasUsed / 5
 		st.refundGas(params.RefundQuotientEIP3529)
 	}
+	effectiveTip := msg.GasPrice
+	if rules.IsLondon {
+		effectiveTip = cmath.BigMin(msg.GasTipCap, new(big.Int).Sub(msg.GasFeeCap, st.evm.Context.BaseFee))
+	}
 
 	if st.evm.ChainConfig().ChaophrayaBlock != nil && st.evm.ChainConfig().IsChaophraya(st.evm.Context.BlockNumber) {
-		st.state.AddBalance(consensus.SystemAddress, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.gasPrice))
+		fee := new(big.Int).SetUint64(st.gasUsed())
+		fee.Mul(fee, effectiveTip)
+		st.state.AddBalance(consensus.SystemAddress, fee)
 	} else {
-		effectiveTip := st.gasPrice
-		if london {
-			effectiveTip = cmath.BigMin(st.gasTipCap, new(big.Int).Sub(st.gasFeeCap, st.evm.Context.BaseFee))
-		}
-		st.state.AddBalance(st.evm.Context.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), effectiveTip))
+		fee := new(big.Int).SetUint64(st.gasUsed())
+		fee.Mul(fee, effectiveTip)
+		st.state.AddBalance(st.evm.Context.Coinbase, fee)
 	}
 
 	return &ExecutionResult{

@@ -17,6 +17,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -58,6 +60,7 @@ func NewStateProcessor(config *params.ChainConfig, bc *BlockChain, engine consen
 // transactions failed to execute due to insufficient gas it will return an error.
 func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg vm.Config) (types.Receipts, []*types.Log, uint64, error) {
 	var (
+		receipts    = make([]*types.Receipt, 0)
 		usedGas     = new(uint64)
 		header      = block.Header()
 		blockHash   = block.Hash()
@@ -65,25 +68,26 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		allLogs     []*types.Log
 		gp          = new(GasPool).AddGas(block.GasLimit())
 	)
-
-	var receipts = make([]*types.Receipt, 0)
 	// Mutate the block and state according to any hard-fork specs
 	if p.config.DAOForkSupport && p.config.DAOForkBlock != nil && p.config.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(statedb)
 	}
-	blockContext := NewEVMBlockContext(header, p.bc, nil)
-	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)
+	var (
+		context = NewEVMBlockContext(header, p.bc, nil)
+		vmenv   = vm.NewEVM(context, vm.TxContext{}, statedb, p.config, cfg)
+		signer  = types.MakeSigner(p.config, header.Number, header.Time)
+	)
+	// Iterate over and process the individual transactions
+
+	// TODO: Rename posa
 
 	txNum := len(block.Transactions())
-	// Iterate over and process the individual transactions
 	posa, _ := p.engine.(consensus.PoSA)
 	commonTxs := make([]*types.Transaction, 0, txNum)
-
-	signer := types.MakeSigner(p.config, header.Number)
-
 	systemTxs := make([]*types.Transaction, 0)
 
 	for i, tx := range block.Transactions() {
+		log.Debug("🚧🚧🚧 Do transaction", "index", i, "tx", tx.Hash())
 		if p.config.ChaophrayaBlock != nil && p.config.IsChaophraya(blockNumber) {
 			isSystemTx, _ := posa.IsSystemTransaction(tx, block.Header(), p.bc)
 			if isSystemTx {
@@ -91,9 +95,9 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 				continue
 			}
 		}
-		msg, err := tx.AsMessage(signer, header.BaseFee)
+		msg, err := TransactionToMessage(tx, signer, header.BaseFee)
 		if err != nil {
-			return nil, nil, 0, err
+			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
 		statedb.SetTxContext(tx.Hash(), i)
 		receipt, err := applyTransaction(msg, p.config, gp, statedb, blockNumber, blockHash, tx, usedGas, vmenv)
@@ -106,14 +110,16 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	// Fail if Shanghai not enabled and len(withdrawals) is non-zero.
 	withdrawals := block.Withdrawals()
 	if len(withdrawals) > 0 && !p.config.IsShanghai(block.Number(), block.Time()) {
-		return nil, nil, 0, fmt.Errorf("withdrawals before shanghai")
+		return nil, nil, 0, errors.New("withdrawals before shanghai")
 	}
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	err := p.engine.Finalize(p.bc, header, statedb, &commonTxs, block.Uncles(), &receipts, &systemTxs, usedGas)
 	if err != nil {
 		return receipts, allLogs, *usedGas, err
 	}
+
 	for _, receipt := range receipts {
+		log.Debug("🔥🔥🔥🔥  receipt", "receipt", receipt)
 		allLogs = append(allLogs, receipt.Logs...)
 	}
 
@@ -162,6 +168,7 @@ func applyTransaction(msg *Message, config *params.ChainConfig, gp *GasPool, sta
 	receipt.BlockHash = blockHash
 	receipt.BlockNumber = blockNumber
 	receipt.TransactionIndex = uint(statedb.TxIndex())
+	log.Debug("applyTransaction", "receipt", receipt)
 	return receipt, err
 }
 

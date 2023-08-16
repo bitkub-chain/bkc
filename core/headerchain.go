@@ -323,7 +323,8 @@ func (hc *HeaderChain) ValidateHeaderChain(chain []*types.Header) (int, error) {
 		}
 	}
 	// Start the parallel verifier
-	abort, results := hc.engine.VerifyHeaders(hc, chain)
+	seals := make([]bool, len(chain))
+	abort, results := hc.engine.VerifyHeaders(hc, chain, seals)
 	defer close(abort)
 
 	// Iterate over the headers and ensure they all check out
