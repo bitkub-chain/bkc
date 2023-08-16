@@ -225,7 +225,7 @@ func (eth *Ethereum) stateAtTransaction(ctx context.Context, block *types.Block,
 		if eth.blockchain.Config().ChaophrayaBlock != nil && eth.blockchain.Config().IsChaophraya(block.Header().Number) {
 			posa, _ := eth.Engine().(consensus.PoSA)
 			isSystem, _ := posa.IsSystemTransaction(tx, block.Header(), eth.BlockChain())
-			if msg.From() == context.Coinbase && isSystem {
+			if msg.From == context.Coinbase && isSystem {
 				balance := statedb.GetBalance(consensus.SystemAddress)
 				if balance.Cmp(common.Big0) > 0 {
 					statedb.SetBalance(consensus.SystemAddress, big.NewInt(0))
@@ -233,7 +233,8 @@ func (eth *Ethereum) stateAtTransaction(ctx context.Context, block *types.Block,
 				}
 			}
 		}
-		statedb.Prepare(tx.Hash(), idx)
+		rules := eth.blockchain.Config().Rules(block.Header().Number, false, block.Time())
+		statedb.Prepare(rules, msg.From, block.Coinbase(), msg.To, nil, nil)
 		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 			return nil, vm.BlockContext{}, nil, nil, fmt.Errorf("transaction %#x failed: %v", tx.Hash(), err)
 		}

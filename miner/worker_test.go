@@ -244,7 +244,7 @@ func testGenerateBlockAndImport(t *testing.T, isClique bool) {
 
 		mockContractClient := newMockContractClient(t)
 		mockContractClient.EXPECT().SetSigner(gomock.Any()).AnyTimes()
-		engine = clique.New(chainConfig, db, nil, mockContractClient)
+		engine = clique.New(&chainConfig, db, nil, mockContractClient)
 	} else {
 		chainConfig = *params.AllEthashProtocolChanges
 		engine = ethash.NewFaker()

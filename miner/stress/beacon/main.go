@@ -237,7 +237,7 @@ func newNodeManager(genesis *core.Genesis) *nodeManager {
 	return &nodeManager{
 		close:        make(chan struct{}),
 		genesis:      genesis,
-		genesisBlock: genesis.ToBlock(nil),
+		genesisBlock: genesis.ToBlock(),
 	}
 }
 
@@ -259,7 +259,7 @@ func (mgr *nodeManager) getNodes(typ nodetype) []*ethNode {
 
 func (mgr *nodeManager) startMining() {
 	for _, node := range append(mgr.getNodes(eth2MiningNode), mgr.getNodes(legacyMiningNode)...) {
-		if err := node.ethBackend.StartMining(1); err != nil {
+		if err := node.ethBackend.StartMining(); err != nil {
 			panic(err)
 		}
 	}

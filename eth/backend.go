@@ -139,34 +139,33 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if err != nil {
 		return nil, err
 	}
-	engine, err := ethconfig.CreateConsensusEngine(chainConfig, chainDb)
-	if err != nil {
-		return nil, err
-	}
+	// if err != nil {
+	// 	return nil, err
+	// }
 	eth := &Ethereum{
-		config:            config,
-		merger:            consensus.NewMerger(chainDb),
-		chainDb:           chainDb,
-		eventMux:          stack.EventMux(),
-		accountManager:    stack.AccountManager(),
-		engine:            engine,
+		config:         config,
+		merger:         consensus.NewMerger(chainDb),
+		chainDb:        chainDb,
+		eventMux:       stack.EventMux(),
+		accountManager: stack.AccountManager(),
+		//  !engine:            engine,
 		closeBloomHandler: make(chan struct{}),
 		networkID:         config.NetworkId,
 		gasPrice:          config.Miner.GasPrice,
 		etherbase:         config.Miner.Etherbase,
-		sealerAddress:     config.Miner.SealerAddress,
-		bloomRequests:     make(chan chan *bloombits.Retrieval),
-		bloomIndexer:      core.NewBloomIndexer(chainDb, params.BloomBitsBlocks, params.BloomConfirms),
-		p2pServer:         stack.Server(),
-		shutdownTracker:   shutdowncheck.NewShutdownTracker(chainDb),
+		// !sealerAddress:     config.Miner.SealerAddress,
+		bloomRequests:   make(chan chan *bloombits.Retrieval),
+		bloomIndexer:    core.NewBloomIndexer(chainDb, params.BloomBitsBlocks, params.BloomConfirms),
+		p2pServer:       stack.Server(),
+		shutdownTracker: shutdowncheck.NewShutdownTracker(chainDb),
 	}
 
 	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
 	if eth.APIBackend.allowUnprotectedTxs {
 		log.Info("Unprotected transactions allowed")
 	}
-	ethAPI := ethapi.NewPublicBlockChainAPI(eth.APIBackend)
-	eth.engine = ethconfig.CreateConsensusEngine(stack, chainConfig, &ethashConfig, config.Miner.Notify, config.Miner.Noverify, chainDb, ethAPI)
+	blockchainAPI := ethapi.NewBlockChainAPI(eth.APIBackend)
+	eth.engine, err = ethconfig.CreateConsensusEngine(chainConfig, chainDb, eth.APIBackend, blockchainAPI)
 
 	bcVersion := rawdb.ReadDatabaseVersion(chainDb)
 	var dbVer = "<nil>"
@@ -444,18 +443,19 @@ func (s *Ethereum) StartMining() error {
 			}
 		}
 		if cli != nil {
-			sa, err := s.SealerAddress()
-			if err != nil {
-				log.Error("Cannot start mining without sealer address", "err", err)
-				return fmt.Errorf("sealer address missing: %v", err)
-			}
-			wallet, err := s.accountManager.Find(accounts.Account{Address: sa})
+			// TODO: RECHECK
+			// sa, err := s.SealerAddress()
+			// if err != nil {
+			// 	log.Error("Cannot start mining without sealer address", "err", err)
+			// 	return fmt.Errorf("sealer address missing: %v", err)
+			// }
+			wallet, err := s.accountManager.Find(accounts.Account{Address: eb})
 			if wallet == nil || err != nil {
 				log.Error("Sealer account unavailable locally", "err", err)
 				return fmt.Errorf("signer missing: %v", err)
 			}
-			cli.Authorize(sa, wallet.SignData, wallet.SignTx)
-			s.miner.SetSealer(sa)
+			cli.Authorize(eb, wallet.SignData, wallet.SignTx)
+			// s.miner.SetSealer(sa)
 		}
 		// If mining is started, we can disable the transaction rejection mechanism
 		// introduced to speed sync times.

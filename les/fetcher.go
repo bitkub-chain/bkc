@@ -161,7 +161,7 @@ func newLightFetcher(chain *light.LightChain, engine consensus.Engine, peers *se
 	// Construct the fetcher by offering all necessary APIs
 	validator := func(header *types.Header) error {
 		// Disable seal verification explicitly if we are running in ulc mode.
-		return engine.VerifyHeader(chain, header)
+		return engine.VerifyHeader(chain, header, false)
 	}
 	heighter := func() uint64 { return chain.CurrentHeader().Number.Uint64() }
 	dropper := func(id string) { peers.unregister(id) }

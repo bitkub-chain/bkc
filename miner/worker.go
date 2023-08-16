@@ -577,6 +577,7 @@ func (w *worker) mainLoop() {
 	for {
 		select {
 		case req := <-w.newWorkCh:
+			log.Debug("new word receive", "req", req)
 			w.commitWork(req.interrupt, req.noempty, req.timestamp)
 
 		case req := <-w.getWorkCh:
@@ -663,6 +664,7 @@ func (w *worker) mainLoop() {
 				// submit sealing work here since all empty submission will be rejected
 				// by clique. Of course the advance sealing(empty submission) is disabled.
 				if w.chainConfig.Clique != nil && w.chainConfig.Clique.Period == 0 {
+					log.Debug("🍒🍒🍒🍒🍒")
 					w.commitWork(nil, true, time.Now().Unix())
 				}
 			}
@@ -1153,6 +1155,7 @@ func (w *worker) commitWork(interrupt *atomic.Int32, noempty bool, timestamp int
 	// Create an empty block based on temporary copied state for
 	// sealing in advance without waiting block execution finished.
 	if !noempty && !w.noempty.Load() {
+		log.Debug("⚠️⚠️⚠️⚠️⚠️")
 		w.commit(work.copy(), nil, false, start)
 	}
 	// Fill pending transactions from the txpool into the block.
@@ -1216,12 +1219,12 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 			select {
 			case w.taskCh <- &task{receipts: env.receipts, state: env.state, block: block, createdAt: time.Now()}:
 				w.unconfirmed.Shift(block.NumberU64() - 1)
-
-				fees := totalFees(block, env.receipts)
-				feesInEther := new(big.Float).Quo(new(big.Float).SetInt(fees), big.NewFloat(params.Ether))
+				// ! BKC PoS fee calculation does not relies on this process.
+				// fees := totalFees(block, env.receipts)
+				// feesInEther := new(big.Float).Quo(new(big.Float).SetInt(fees), big.NewFloat(params.Ether))
 				log.Info("Commit new sealing work", "number", block.Number(), "sealhash", w.engine.SealHash(block.Header()),
 					"uncles", len(env.uncles), "txs", env.tcount,
-					"gas", block.GasUsed(), "fees", feesInEther,
+					"gas", block.GasUsed(), "fees", nil,
 					"elapsed", common.PrettyDuration(time.Since(start)))
 
 			case <-w.exitCh:
@@ -1291,6 +1294,8 @@ func (w *worker) postSideBlock(event core.ChainSideEvent) {
 
 // totalFees computes total consumed miner fees in Wei. Block transactions and receipts have to have the same order.
 func totalFees(block *types.Block, receipts []*types.Receipt) *big.Int {
+	// TODO: Remove the log below
+	log.Debug("totalfees", "txs", len(block.Transactions()), "receipts", len(receipts), "number", block.Number())
 	feesWei := new(big.Int)
 	for i, tx := range block.Transactions() {
 		minerFee, _ := tx.EffectiveGasTip(block.BaseFee())

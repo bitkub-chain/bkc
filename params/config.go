@@ -809,7 +809,7 @@ type Rules struct {
 	ChainID                                                 *big.Int
 	IsHomestead, IsEIP150, IsEIP155, IsEIP158               bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
-	IsErawan, IsChaophraya                                  bool
+	IsErawan, IsChaophraya, IsChaophrayaBangkok             bool
 	IsBerlin, IsLondon                                      bool
 	IsMerge, IsShanghai, IsCancun, IsPrague                 bool
 }
@@ -821,22 +821,23 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		chainID = new(big.Int)
 	}
 	return Rules{
-		ChainID:          new(big.Int).Set(chainID),
-		IsHomestead:      c.IsHomestead(num),
-		IsEIP150:         c.IsEIP150(num),
-		IsEIP155:         c.IsEIP155(num),
-		IsEIP158:         c.IsEIP158(num),
-		IsByzantium:      c.IsByzantium(num),
-		IsConstantinople: c.IsConstantinople(num),
-		IsPetersburg:     c.IsPetersburg(num),
-		IsIstanbul:       c.IsIstanbul(num),
-		IsErawan:         c.IsErawan(num),
-		IsChaophraya:     c.IsChaophraya(num),
-		IsBerlin:         c.IsBerlin(num),
-		IsLondon:         c.IsLondon(num),
-		IsMerge:          isMerge,
-		IsShanghai:       c.IsShanghai(num, timestamp),
-		IsCancun:         c.IsCancun(num, timestamp),
-		IsPrague:         c.IsPrague(num, timestamp),
+		ChainID:             new(big.Int).Set(chainID),
+		IsHomestead:         c.IsHomestead(num),
+		IsEIP150:            c.IsEIP150(num),
+		IsEIP155:            c.IsEIP155(num),
+		IsEIP158:            c.IsEIP158(num),
+		IsByzantium:         c.IsByzantium(num),
+		IsConstantinople:    c.IsConstantinople(num),
+		IsPetersburg:        c.IsPetersburg(num),
+		IsIstanbul:          c.IsIstanbul(num),
+		IsErawan:            c.IsErawan(num),
+		IsChaophraya:        c.IsChaophraya(num),
+		IsChaophrayaBangkok: c.IsChaophrayaBangkok(num),
+		IsBerlin:            c.IsBerlin(num),
+		IsLondon:            c.IsLondon(num),
+		IsMerge:             isMerge,
+		IsShanghai:          c.IsShanghai(num, timestamp),
+		IsCancun:            c.IsCancun(num, timestamp),
+		IsPrague:            c.IsPrague(num, timestamp),
 	}
 }

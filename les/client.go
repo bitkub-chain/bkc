@@ -101,7 +101,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*LightEthereum, error) {
 	if _, isCompat := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !isCompat {
 		return nil, genesisErr
 	}
-	engine, err := ethconfig.CreateConsensusEngine(chainConfig, chainDb)
+	engine, err := ethconfig.CreateConsensusEngine(chainConfig, chainDb, nil, nil)
 	if err != nil {
 		return nil, err
 	}
