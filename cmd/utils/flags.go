@@ -485,6 +485,11 @@ var (
 		Usage:    "0x prefixed public address for block mining rewards",
 		Category: flags.MinerCategory,
 	}
+	MinerSealerAddressFlag = &cli.StringFlag{
+		Name:     "miner.sealerAddress",
+		Usage:    "Address for sealing blocks (default = first account)",
+		Category: flags.MinerCategory,
+	}
 	MinerExtraDataFlag = &cli.StringFlag{
 		Name:     "miner.extradata",
 		Usage:    "Block extra data set by the miner (default = client version)",

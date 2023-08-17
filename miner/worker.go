@@ -345,6 +345,13 @@ func (w *worker) setEtherbase(addr common.Address) {
 	w.coinbase = addr
 }
 
+// setSealer sets the address to initialize the block sealer field.
+func (w *worker) setSealer(addr common.Address) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.sealer = addr
+}
+
 // etherbase retrieves the configured etherbase address.
 func (w *worker) etherbase() common.Address {
 	w.mu.RLock()

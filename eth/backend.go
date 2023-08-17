@@ -143,21 +143,20 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	// 	return nil, err
 	// }
 	eth := &Ethereum{
-		config:         config,
-		merger:         consensus.NewMerger(chainDb),
-		chainDb:        chainDb,
-		eventMux:       stack.EventMux(),
-		accountManager: stack.AccountManager(),
-		//  !engine:            engine,
+		config:            config,
+		merger:            consensus.NewMerger(chainDb),
+		chainDb:           chainDb,
+		eventMux:          stack.EventMux(),
+		accountManager:    stack.AccountManager(),
 		closeBloomHandler: make(chan struct{}),
 		networkID:         config.NetworkId,
 		gasPrice:          config.Miner.GasPrice,
 		etherbase:         config.Miner.Etherbase,
-		// !sealerAddress:     config.Miner.SealerAddress,
-		bloomRequests:   make(chan chan *bloombits.Retrieval),
-		bloomIndexer:    core.NewBloomIndexer(chainDb, params.BloomBitsBlocks, params.BloomConfirms),
-		p2pServer:       stack.Server(),
-		shutdownTracker: shutdowncheck.NewShutdownTracker(chainDb),
+		sealerAddress:     config.Miner.SealerAddress,
+		bloomRequests:     make(chan chan *bloombits.Retrieval),
+		bloomIndexer:      core.NewBloomIndexer(chainDb, params.BloomBitsBlocks, params.BloomConfirms),
+		p2pServer:         stack.Server(),
+		shutdownTracker:   shutdowncheck.NewShutdownTracker(chainDb),
 	}
 
 	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
@@ -350,7 +349,7 @@ func (s *Ethereum) SealerAddress() (sa common.Address, err error) {
 			return sealerAddress, nil
 		}
 	}
-	return common.Address{}, fmt.Errorf("Sealer address must be explicitly specified")
+	return common.Address{}, fmt.Errorf("sealer address must be explicitly specified")
 }
 
 // isLocalBlock checks whether the specified block is mined
@@ -429,7 +428,7 @@ func (s *Ethereum) StartMining() error {
 		s.txPool.SetGasPrice(price)
 
 		// Configure the local mining address
-		eb, err := s.Etherbase()
+		_, err := s.Etherbase()
 		if err != nil {
 			log.Error("Cannot start mining without etherbase", "err", err)
 			return fmt.Errorf("etherbase missing: %v", err)
@@ -444,18 +443,18 @@ func (s *Ethereum) StartMining() error {
 		}
 		if cli != nil {
 			// TODO: RECHECK
-			// sa, err := s.SealerAddress()
-			// if err != nil {
-			// 	log.Error("Cannot start mining without sealer address", "err", err)
-			// 	return fmt.Errorf("sealer address missing: %v", err)
-			// }
-			wallet, err := s.accountManager.Find(accounts.Account{Address: eb})
+			sa, err := s.SealerAddress()
+			if err != nil {
+				log.Error("Cannot start mining without sealer address", "err", err)
+				return fmt.Errorf("sealer address missing: %v", err)
+			}
+			wallet, err := s.accountManager.Find(accounts.Account{Address: sa})
 			if wallet == nil || err != nil {
 				log.Error("Sealer account unavailable locally", "err", err)
 				return fmt.Errorf("signer missing: %v", err)
 			}
-			cli.Authorize(eb, wallet.SignData, wallet.SignTx)
-			// s.miner.SetSealer(sa)
+			cli.Authorize(sa, wallet.SignData, wallet.SignTx)
+			s.miner.SetSealer(sa)
 		}
 		// If mining is started, we can disable the transaction rejection mechanism
 		// introduced to speed sync times.

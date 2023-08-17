@@ -56,7 +56,6 @@ type Config struct {
 	Recommit      time.Duration  // The time interval for miner to re-create mining work.
 	Noverify      bool           // Disable remote mining solution verification(only useful in ethash).
 
-
 	NewPayloadTimeout time.Duration // The maximum time allowance for creating a new payload
 }
 
@@ -82,6 +81,7 @@ type Miner struct {
 	startCh chan struct{}
 	stopCh  chan struct{}
 	worker  *worker
+	sealer  common.Address
 
 	wg sync.WaitGroup
 }
@@ -246,6 +246,11 @@ func (miner *Miner) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
 
 func (miner *Miner) SetEtherbase(addr common.Address) {
 	miner.worker.setEtherbase(addr)
+}
+
+func (miner *Miner) SetSealer(addr common.Address) {
+	miner.sealer = addr
+	miner.worker.setSealer(addr)
 }
 
 // SetGasCeil sets the gaslimit to strive for when mining blocks post 1559.
