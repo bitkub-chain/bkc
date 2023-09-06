@@ -2432,7 +2432,6 @@ func (bc *BlockChain) maintainTxIndex() {
 func (bc *BlockChain) reportBlock(block *types.Block, receipts types.Receipts, err error) {
 	rawdb.WriteBadBlock(bc.db, block)
 	log.Error(summarizeBadBlock(block, receipts, bc.Config(), err))
-	panic("🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴")
 }
 
 // summarizeBadBlock returns a string summarizing the bad block and other
