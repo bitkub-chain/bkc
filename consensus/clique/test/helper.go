@@ -53,6 +53,7 @@ func NewDefaultGenesis() *core.Genesis {
 		Difficulty: new(big.Int).SetUint64(difficulty),
 		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		ParentHash: common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Alloc:      make(core.GenesisAlloc),
 	}
 	return g
 }

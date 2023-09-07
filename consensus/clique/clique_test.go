@@ -712,13 +712,19 @@ func TestDistributeReward(t *testing.T) {
 	)
 
 	// Create the genesis block with the initial set of signers
-	genesis := &core.Genesis{
-		ExtraData: make([]byte, extraVanity+common.AddressLength+extraSeal),
-		BaseFee:   big.NewInt(params.InitialBaseFee),
-		Alloc: map[common.Address]core.GenesisAccount{
-			addr: {Balance: big.NewInt(10000000000000000)},
-		},
-	}
+	// genesis := &core.Genesis{
+	// 	ExtraData: make([]byte, extraVanity+common.AddressLength+extraSeal),
+	// 	BaseFee:   big.NewInt(params.InitialBaseFee),
+	// 	Alloc: map[common.Address]core.GenesisAccount{
+	// 		addr: {Balance: big.NewInt(10000000000000000)},
+	// 	},
+	// }
+
+	genesis := test.NewDefaultGenesis()
+	genesis.ExtraData = make([]byte, extraVanity+common.AddressLength+extraSeal)
+	genesis.BaseFee = big.NewInt(params.InitialBaseFee)
+	genesis.Alloc[addr] = core.GenesisAccount{Balance: big.NewInt(10000000000000000)}
+
 	copy(genesis.ExtraData[extraVanity:], addr[:])
 	// Create a pristine blockchain with the genesis injected
 	db := rawdb.NewMemoryDatabase()
@@ -747,7 +753,7 @@ func TestDistributeReward(t *testing.T) {
 	engine := New(&config, db, nil, mockContractClient)
 	engine.fakeDiff = true
 
-	chain, _ := core.NewBlockChain(
+	chain, err := core.NewBlockChain(
 		db,
 		nil,
 		genesis,
@@ -757,6 +763,10 @@ func TestDistributeReward(t *testing.T) {
 		nil,
 		nil,
 	)
+
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	valz_1 := make([]ctypes.Validator, config.Clique.Span)
 	for v := 0; v < int(config.Clique.Span); v++ {
@@ -797,7 +807,6 @@ func TestDistributeReward(t *testing.T) {
 		copy(header.Extra[len(header.Extra)-extraSeal:], sig)
 		blocks[j] = block.WithSeal(header)
 	}
-
 	if _, err := chain.InsertChain(blocks); err != nil {
 		t.Fatalf("failed to insert initial blocks: %v", err)
 	}
