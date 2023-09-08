@@ -165,7 +165,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 	blockchainAPI := ethapi.NewBlockChainAPI(eth.APIBackend)
 	eth.engine, err = ethconfig.CreateConsensusEngine(chainConfig, chainDb, eth.APIBackend, blockchainAPI)
-
+	if err != nil {
+		return nil, err
+	}
 	bcVersion := rawdb.ReadDatabaseVersion(chainDb)
 	var dbVer = "<nil>"
 	if bcVersion != nil {
