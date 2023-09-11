@@ -113,14 +113,12 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		return nil, nil, 0, errors.New("withdrawals before shanghai")
 	}
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	log.Debug("🔥🔥🔥🔥  receipts (finalize)", "receipts", receipts)
 	err := p.engine.Finalize(p.bc, header, statedb, &commonTxs, block.Uncles(), &receipts, &systemTxs, usedGas)
 	if err != nil {
 		return receipts, allLogs, *usedGas, err
 	}
 
 	for _, receipt := range receipts {
-		log.Debug("🔥🔥🔥🔥  receipt", "receipt", receipt)
 		allLogs = append(allLogs, receipt.Logs...)
 	}
 
