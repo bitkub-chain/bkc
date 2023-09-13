@@ -646,7 +646,6 @@ func (api *API) traceBlockParallel(ctx context.Context, block *types.Block, stat
 	for th := 0; th < threads; th++ {
 		pend.Add(1)
 		go func() {
-			blockCtx := core.NewEVMBlockContext(block.Header(), api.chainContext(ctx), nil)
 			defer pend.Done()
 			// Fetch and execute the next transaction trace tasks
 			for task := range jobs {
