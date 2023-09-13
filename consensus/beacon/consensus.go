@@ -341,8 +341,10 @@ func (beacon *Beacon) Finalize(chain consensus.ChainHeaderReader, header *types.
 		return beacon.ethone.Finalize(chain, header, state, txs, uncles, receipts, systemTxs, usedGas)
 
 	}
-	return errors.New("beacon PoS are not allow on bkc node")
-	// No block reward which is issued by consensus layer instead.
+	// Force using ethone (beacon is not supported in bkc node)
+	// There might be an future improvement here so please leave
+	// the code like this.
+	return nil
 }
 
 // FinalizeAndAssemble implements consensus.Engine, setting the final state and
@@ -350,15 +352,34 @@ func (beacon *Beacon) Finalize(chain consensus.ChainHeaderReader, header *types.
 func (beacon *Beacon) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB, txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, []*types.Receipt, error) {
 	// FinalizeAndAssemble is different with Prepare, it can be used in both block
 	// generation and verification. So determine the consensus rules by header type.
+
+	var (
+		withdrawals []*types.Withdrawal
+	)
+
 	if !beacon.IsPoSHeader(header) {
 		return beacon.ethone.FinalizeAndAssemble(chain, header, state, txs, uncles, receipts)
+	}
+	// Shanghai is not currently supported on bitkub chain.
+	// Withdrawals always be an empty array.
+	shanghai := chain.Config().IsShanghai(header.Number, header.Time)
+	if shanghai {
+		// All blocks after Shanghai must include a withdrawals root.
+		withdrawals = make([]*types.Withdrawal, 0)
+
+	} else {
+		if len(withdrawals) > 0 {
+			return nil, nil, errors.New("withdrawals set before Shanghai activation")
+		}
 	}
 	// Finalize and assemble the block
 	err := beacon.Finalize(chain, header, state, &txs, uncles, nil, nil, nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	return types.NewBlock(header, txs, uncles, receipts, trie.NewStackTrie(nil)), receipts, nil
+	// Assign the final state root to header.
+	header.Root = state.IntermediateRoot(true)
+	return types.NewBlockWithWithdrawals(header, txs, uncles, receipts, withdrawals, trie.NewStackTrie(nil)), nil, nil
 }
 
 // Seal generates a new sealing request for the given input block and pushes
