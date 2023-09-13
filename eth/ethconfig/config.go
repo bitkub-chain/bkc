@@ -175,7 +175,7 @@ func CreateConsensusEngine(config *params.ChainConfig, db ethdb.Database, backen
 		if err != nil {
 			panic(err)
 		}
-		return clique.New(config, db, backend, client), nil
+		return beacon.New(clique.New(config, db, backend, client)), nil
 	}
 	// If defaulting to proof-of-work, enforce an already merged network since
 	// we cannot run PoW algorithms and more, so we cannot even follow a chain
