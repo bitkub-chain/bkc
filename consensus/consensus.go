@@ -132,9 +132,10 @@ type PoW interface {
 	Hashrate() float64
 }
 
-type PoSA interface {
+type PoS interface {
 	Engine
 
-	// IsSystemContract(to *common.Address) bool
+	// IsSystemTransaction tells if the given transaction considered as a 
+	// system transaction.
 	IsSystemTransaction(tx *types.Transaction, header *types.Header, chain ChainHeaderReader) (bool, error)
 }

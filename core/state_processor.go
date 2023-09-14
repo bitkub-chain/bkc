@@ -79,17 +79,25 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	)
 	// Iterate over and process the individual transactions
 
-	// TODO: Rename posa
+	posSupportedEngine, posSupported := p.engine.(consensus.PoS)
 
 	txNum := len(block.Transactions())
-	posa, _ := p.engine.(consensus.PoSA)
 	commonTxs := make([]*types.Transaction, 0, txNum)
 	systemTxs := make([]*types.Transaction, 0)
 
 	for i, tx := range block.Transactions() {
-		log.Debug("🚧🚧🚧 Do transaction", "index", i, "tx", tx.Hash())
 		if p.config.ChaophrayaBlock != nil && p.config.IsChaophraya(blockNumber) {
-			isSystemTx, _ := posa.IsSystemTransaction(tx, block.Header(), p.bc)
+			if !posSupported {
+				log.Error(
+					"consensus engine is not supported Bitkub Chain PoS",
+					"chaophrayaBlock", p.config.ChaophrayaBlock,
+					"isChaophraya", p.config.IsChaophraya(blockNumber),
+					"chaophrayaBangkokBlock", p.config.ChaophrayaBangkokBlock,
+					"isChaophrayaBangkok", p.config.IsChaophrayaBangkok(blockNumber),
+				)
+				panic(consensus.ErrNotPoSSupported)
+			}
+			isSystemTx, _ := posSupportedEngine.IsSystemTransaction(tx, block.Header(), p.bc)
 			if isSystemTx {
 				systemTxs = append(systemTxs, tx)
 				continue

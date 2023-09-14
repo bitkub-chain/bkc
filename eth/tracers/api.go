@@ -961,7 +961,7 @@ func (api *API) traceTx(ctx context.Context, message *core.Message, txctx *Conte
 	}()
 	defer cancel()
 
-	if _, ok := api.backend.Engine().(consensus.PoSA); ok && message.From == vmctx.Coinbase && message.GasPrice.Cmp(big.NewInt(0)) == 0 {
+	if _, ok := api.backend.Engine().(consensus.PoS); ok && message.From == vmctx.Coinbase && message.GasPrice.Cmp(big.NewInt(0)) == 0 {
 		balance := statedb.GetBalance(consensus.SystemAddress)
 		if balance.Cmp(common.Big0) > 0 {
 			statedb.SetBalance(consensus.SystemAddress, big.NewInt(0))

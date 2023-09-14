@@ -38,4 +38,8 @@ var (
 	// ErrInvalidTerminalBlock is returned if a block is invalid wrt. the terminal
 	// total difficulty.
 	ErrInvalidTerminalBlock = errors.New("invalid terminal block")
+
+	// ErrNotPoSSupported is returned or panic when the active engine
+	// does not implement the consensus.PoS
+	ErrNotPoSSupported = errors.New("engine should implement the consensus.PoS")
 )

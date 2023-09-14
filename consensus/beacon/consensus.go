@@ -463,3 +463,16 @@ func IsTTDReached(chain consensus.ChainHeaderReader, parentHash common.Hash, par
 	}
 	return td.Cmp(chain.Config().TerminalTotalDifficulty) >= 0, nil
 }
+
+// Extra implementation for supporting Bitkub Chain PoSA and PoS
+
+func (beacon *Beacon) IsSystemTransaction(tx *types.Transaction, header *types.Header, chain consensus.ChainHeaderReader) (bool, error) {
+	if !beacon.IsPoSHeader(header) {
+		engine, ok := beacon.ethone.(consensus.PoS)
+		if !ok {
+			panic("beacon method IsSystemTransaction called with an invalid ethone engine")
+		}
+		return engine.IsSystemTransaction(tx, header, chain)
+	}
+	return false, nil
+}
