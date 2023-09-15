@@ -2,7 +2,13 @@ variables:
   GO_INSTALL_VERSION: go1.20.7
 
 stages:
+  - test
   - build
+
+test-job:
+  stage: test
+  script:
+    - make test
 
 build-job:
   image: ubuntu:18.04
