@@ -1301,8 +1301,6 @@ func (w *worker) postSideBlock(event core.ChainSideEvent) {
 
 // totalFees computes total consumed miner fees in Wei. Block transactions and receipts have to have the same order.
 func totalFees(block *types.Block, receipts []*types.Receipt) *big.Int {
-	// TODO: Remove the log below
-	log.Debug("totalfees", "txs", len(block.Transactions()), "receipts", len(receipts), "number", block.Number())
 	feesWei := new(big.Int)
 	for i, tx := range block.Transactions() {
 		minerFee, _ := tx.EffectiveGasTip(block.BaseFee())
