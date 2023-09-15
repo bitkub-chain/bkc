@@ -154,7 +154,6 @@ func testAccessList(t *testing.T, client *rpc.Client) {
 		From: testAddr,
 		To:   &common.Address{},
 		Gas:  21000,
-		// GasPrice: big.NewInt(765625000),
 		GasPrice: big.NewInt(params.InitialBaseFee),
 		Value:    big.NewInt(1),
 	}

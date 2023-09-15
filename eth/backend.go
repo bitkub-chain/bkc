@@ -444,7 +444,6 @@ func (s *Ethereum) StartMining() error {
 			}
 		}
 		if cli != nil {
-			// TODO: RECHECK
 			sa, err := s.SealerAddress()
 			if err != nil {
 				log.Error("Cannot start mining without sealer address", "err", err)
