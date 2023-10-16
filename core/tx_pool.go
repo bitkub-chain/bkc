@@ -939,6 +939,7 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 // addTxsLocked attempts to queue a batch of transactions if they are valid.
 // The transaction pool lock must be held.
 func (pool *TxPool) addTxsLocked(txs []*types.Transaction, local bool) ([]error, *accountSet) {
+	startedAt := time.Now()
 	dirty := newAccountSet(pool.signer)
 	errs := make([]error, len(txs))
 	for i, tx := range txs {
@@ -949,6 +950,8 @@ func (pool *TxPool) addTxsLocked(txs []*types.Transaction, local bool) ([]error,
 		}
 	}
 	validTxMeter.Mark(int64(len(dirty.accounts)))
+	finishedAt := time.Now()
+	log.Info("👍🏻 Inserted txs (locked)", "txs", len(txs), "duration", finishedAt.Sub(startedAt), "local", local)
 	return errs, dirty
 }
 
