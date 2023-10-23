@@ -36,7 +36,8 @@ import (
 )
 
 var (
-	errBlockInvariant = errors.New("block objects must be instantiated with at least one of num or hash")
+	errBlockInvariant    = errors.New("block objects must be instantiated with at least one of num or hash")
+	errInvalidBlockRange = errors.New("invalid from and to block combination: from > to")
 )
 
 type Long int64
@@ -1105,7 +1106,7 @@ func (r *Resolver) Blocks(ctx context.Context, args struct {
 		to = rpc.BlockNumber(r.backend.CurrentBlock().Number().Int64())
 	}
 	if to < from {
-		return []*Block{}, nil
+		return nil, errInvalidBlockRange
 	}
 	ret := make([]*Block, 0, to-from+1)
 	for i := from; i <= to; i++ {
