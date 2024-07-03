@@ -121,6 +121,9 @@ type Engine interface {
 	// APIs returns the RPC APIs this consensus engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API
 
+	// Check inturn signer for check authority
+	IsInturn(chain ChainHeaderReader, header *types.Header, signer common.Address) bool
+
 	// Close terminates any background threads maintained by the consensus engine.
 	Close() error
 }

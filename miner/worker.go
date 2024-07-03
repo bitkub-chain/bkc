@@ -684,6 +684,13 @@ func (w *worker) taskLoop() {
 			w.pendingTasks[sealHash] = task
 			w.pendingMu.Unlock()
 
+			inturn := w.engine.IsInturn(w.chain, task.block.Header(), w.coinbase)
+
+			if !inturn {
+				log.Error("unauthorized signer", "number", task.block.Number(), "sealHash", sealHash)
+				continue
+			}
+
 			if err := w.engine.Seal(w.chain, task.block, w.resultCh, stopCh); err != nil {
 				log.Warn("Block sealing failed", "err", err)
 				w.pendingMu.Lock()
@@ -704,6 +711,7 @@ func (w *worker) resultLoop() {
 	for {
 		select {
 		case block := <-w.resultCh:
+			log.Debug("✨✨✨ resultLoop ✨✨✨", "block", block)
 			// Short circuit when receiving empty result.
 			if block == nil {
 				continue

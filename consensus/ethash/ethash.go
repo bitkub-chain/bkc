@@ -34,7 +34,9 @@ import (
 	"unsafe"
 
 	"github.com/edsrzf/mmap-go"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -642,6 +644,11 @@ func (ethash *Ethash) SetThreads(threads int) {
 	case ethash.update <- struct{}{}:
 	default:
 	}
+}
+
+// Check inturn signer for check authority
+func (ethash *Ethash) IsInturn(chain consensus.ChainHeaderReader, header *types.Header, signer common.Address) bool {
+	return false
 }
 
 // Hashrate implements PoW, returning the measured rate of the search invocations

@@ -1094,6 +1094,24 @@ func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	}}
 }
 
+// check inturn signer authority
+func (c *Clique) IsInturn(chain consensus.ChainHeaderReader, header *types.Header, signer common.Address) bool {
+	number := header.Number.Uint64()
+
+	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil)
+	if err != nil {
+		panic(err)
+	}
+
+	if c.config.IsChaophraya(big.NewInt(int64(number))) {
+		if c.val != snap.getInturnSigner(number) && c.val != snap.SystemContracts.OfficialNode {
+			return false
+		}
+		return true
+	}
+	return snap.inturn(number, signer)
+}
+
 func (c *Clique) selectNextValidatorSet(parent *types.Header, seedBlock *types.Header) ([]ctypes.Validator, error) {
 	selectedProducers := make([]ctypes.Validator, 0)
 
