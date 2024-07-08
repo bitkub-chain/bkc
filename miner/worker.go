@@ -711,7 +711,6 @@ func (w *worker) resultLoop() {
 	for {
 		select {
 		case block := <-w.resultCh:
-			log.Debug("✨✨✨ resultLoop ✨✨✨", "block", block)
 			// Short circuit when receiving empty result.
 			if block == nil {
 				continue
@@ -1176,6 +1175,13 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 		if interval != nil {
 			interval()
 		}
+
+		inturn := w.engine.IsInturn(w.chain, env.header, w.coinbase)
+
+		if !inturn {
+			return errors.New("unauthorized signer")
+		}
+
 		// Create a local environment copy, avoid the data race with snapshot state.
 		// https://github.com/ethereum/go-ethereum/issues/24299
 		env := env.copy()
