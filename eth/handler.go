@@ -586,40 +586,42 @@ func (h *handler) BroadcastBlock(block *types.Block, propagate bool) {
 // already have the given transaction.
 func (h *handler) BroadcastTransactions(txs types.Transactions) {
 	var (
-		annoCount   int // Count of announcements made
-		annoPeers   int
+		// annoCount   int // Count of announcements made
+		// annoPeers   int
 		directCount int // Count of the txs sent directly to peers
 		directPeers int // Count of the peers that were sent transactions directly
 
 		txset = make(map[*ethPeer][]common.Hash) // Set peer->hash to transfer directly
-		annos = make(map[*ethPeer][]common.Hash) // Set peer->hash to announce
+		// annos = make(map[*ethPeer][]common.Hash) // Set peer->hash to announce
 
 	)
 	// Broadcast transactions to a batch of peers not knowing about it
 	for _, tx := range txs {
 		peers := h.peers.peersWithoutTransaction(tx.Hash())
 		// Send the tx unconditionally to a subset of our peers
-		numDirect := int(math.Sqrt(float64(len(peers))))
+		// numDirect := int(math.Sqrt(float64(len(peers))))
+		// Send the tx to our entire peers
+		numDirect := len(peers)
 		for _, peer := range peers[:numDirect] {
 			txset[peer] = append(txset[peer], tx.Hash())
 		}
-		// For the remaining peers, send announcement only
-		for _, peer := range peers[numDirect:] {
-			annos[peer] = append(annos[peer], tx.Hash())
-		}
+		// // For the remaining peers, send announcement only
+		// for _, peer := range peers[numDirect:] {
+		// 	annos[peer] = append(annos[peer], tx.Hash())
+		// }
 	}
 	for peer, hashes := range txset {
 		directPeers++
 		directCount += len(hashes)
 		peer.AsyncSendTransactions(hashes)
 	}
-	for peer, hashes := range annos {
-		annoPeers++
-		annoCount += len(hashes)
-		peer.AsyncSendPooledTransactionHashes(hashes)
-	}
+	// for peer, hashes := range annos {
+	// 	annoPeers++
+	// 	annoCount += len(hashes)
+	// 	peer.AsyncSendPooledTransactionHashes(hashes)
+	// }
 	log.Debug("Transaction broadcast", "txs", len(txs),
-		"announce packs", annoPeers, "announced hashes", annoCount,
+		// "announce packs", annoPeers, "announced hashes", annoCount,
 		"tx packs", directPeers, "broadcast txs", directCount)
 }
 
